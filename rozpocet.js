@@ -17,7 +17,7 @@ const STEP_LG = 50;
 // ----- Stav -----
 let currentUser = null;
 let unsubscribeBudget = null;
-let budgetData = null; // { amount, expenses: { "YYYY-MM-DD": number } }
+let budgetData = null; // { amount, expenses: { "YYYY-MM-DD": [{id, amount, desc}] } }
 let predictData = {};  // { "YYYY-MM-DD": number } — plánované výdaje
 let periodStart = null;
 let periodEnd = null;
@@ -160,14 +160,19 @@ function getBudgetForPeriod(allData) {
     return allData[key] ? { ...defaultBudget(), ...allData[key] } : defaultBudget();
 }
 
+function genId() {
+    return Math.random().toString(36).slice(2, 10);
+}
+
 function migrateExpenses(expenses) {
     if (!expenses) return {};
     const out = {};
     for (const [key, val] of Object.entries(expenses)) {
         if (Array.isArray(val)) {
-            out[key] = val.reduce((s, e) => s + (e.amount || 0), 0);
-        } else {
-            out[key] = typeof val === "number" ? val : 0;
+            // already new format, ensure each entry has an id
+            out[key] = val.map(e => ({ id: e.id || genId(), amount: e.amount || 0, desc: e.desc || "" }));
+        } else if (typeof val === "number" && val > 0) {
+            out[key] = [{ id: genId(), amount: val, desc: "" }];
         }
     }
     return out;
@@ -198,7 +203,9 @@ function debouncedSave() {
 
 // ----- Výpočty -----
 function daySpent(dateStr) {
-    return (budgetData.expenses && budgetData.expenses[dateStr]) || 0;
+    const entries = budgetData.expenses && budgetData.expenses[dateStr];
+    if (!Array.isArray(entries)) return 0;
+    return entries.reduce((s, e) => s + (e.amount || 0), 0);
 }
 
 function totalSpent() {
@@ -691,80 +698,94 @@ function toggleBubble(dateStr) {
 
 function createBubble(dateStr) {
     const bubble = document.createElement("div");
-    bubble.className = "budget-bubble";
+    bubble.className = "budget-bubble budget-bubble-entries";
 
-    // Řádek ±10
-    const row1 = document.createElement("div");
-    row1.className = "budget-bubble-row";
+    const entries = (budgetData.expenses && budgetData.expenses[dateStr]) || [];
 
-    const minus10 = document.createElement("button");
-    minus10.type = "button";
-    minus10.className = "budget-bubble-btn";
-    minus10.textContent = "−";
-    minus10.addEventListener("click", (e) => {
+    if (entries.length > 0) {
+        const list = document.createElement("div");
+        list.className = "budget-entry-list";
+        entries.forEach((entry) => {
+            const row = document.createElement("div");
+            row.className = "budget-entry-row";
+
+            const info = document.createElement("span");
+            info.className = "budget-entry-info";
+            info.textContent = fmtMoney(entry.amount) + (entry.desc ? " – " + entry.desc : "");
+
+            const delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "budget-entry-del";
+            delBtn.textContent = "✕";
+            delBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                removeEntry(dateStr, entry.id);
+            });
+
+            row.appendChild(info);
+            row.appendChild(delBtn);
+            list.appendChild(row);
+        });
+        bubble.appendChild(list);
+    }
+
+    const form = document.createElement("div");
+    form.className = "budget-entry-form";
+
+    const amtInput = document.createElement("input");
+    amtInput.type = "number";
+    amtInput.className = "budget-entry-amt";
+    amtInput.placeholder = "Kč";
+    amtInput.min = "0";
+    amtInput.step = "1";
+    amtInput.inputMode = "numeric";
+
+    const descInput = document.createElement("input");
+    descInput.type = "text";
+    descInput.className = "budget-entry-desc";
+    descInput.placeholder = "Popis…";
+    descInput.maxLength = 60;
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "budget-entry-add";
+    addBtn.textContent = "Přidat";
+
+    const doAdd = (e) => {
         e.stopPropagation();
-        changeExpense(dateStr, -STEP);
+        const amount = parseFloat(amtInput.value);
+        if (!amount || amount <= 0) { amtInput.focus(); return; }
+        addEntry(dateStr, amount, descInput.value.trim());
+    };
+
+    addBtn.addEventListener("click", doAdd);
+    [amtInput, descInput].forEach((inp) => {
+        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(e); });
+        inp.addEventListener("click", (e) => e.stopPropagation());
     });
 
-    const valueEl = document.createElement("span");
-    valueEl.className = "budget-bubble-value";
-    valueEl.textContent = daySpent(dateStr);
-
-    const plus10 = document.createElement("button");
-    plus10.type = "button";
-    plus10.className = "budget-bubble-btn";
-    plus10.textContent = "+";
-    plus10.addEventListener("click", (e) => {
-        e.stopPropagation();
-        changeExpense(dateStr, STEP);
-    });
-
-    row1.appendChild(minus10);
-    row1.appendChild(valueEl);
-    row1.appendChild(plus10);
-
-    // Řádek ±50
-    const row2 = document.createElement("div");
-    row2.className = "budget-bubble-row";
-
-    const minus50 = document.createElement("button");
-    minus50.type = "button";
-    minus50.className = "budget-bubble-btn budget-bubble-btn-lg";
-    minus50.textContent = "−50";
-    minus50.addEventListener("click", (e) => {
-        e.stopPropagation();
-        changeExpense(dateStr, -STEP_LG);
-    });
-
-    const plus50 = document.createElement("button");
-    plus50.type = "button";
-    plus50.className = "budget-bubble-btn budget-bubble-btn-lg";
-    plus50.textContent = "+50";
-    plus50.addEventListener("click", (e) => {
-        e.stopPropagation();
-        changeExpense(dateStr, STEP_LG);
-    });
-
-    row2.appendChild(minus50);
-    row2.appendChild(plus50);
-
-    bubble.appendChild(row1);
-    bubble.appendChild(row2);
+    form.appendChild(amtInput);
+    form.appendChild(descInput);
+    form.appendChild(addBtn);
+    bubble.appendChild(form);
 
     bubble.addEventListener("click", (e) => e.stopPropagation());
-
     return bubble;
 }
 
-function changeExpense(dateStr, delta) {
+function addEntry(dateStr, amount, desc) {
     if (!budgetData.expenses) budgetData.expenses = {};
-    const current = budgetData.expenses[dateStr] || 0;
-    const next = Math.max(0, current + delta);
-    if (next === 0) {
-        delete budgetData.expenses[dateStr];
-    } else {
-        budgetData.expenses[dateStr] = next;
-    }
+    if (!Array.isArray(budgetData.expenses[dateStr])) budgetData.expenses[dateStr] = [];
+    budgetData.expenses[dateStr].push({ id: genId(), amount, desc });
+    debouncedSave();
+    renderSummary();
+    renderCalendar();
+}
+
+function removeEntry(dateStr, entryId) {
+    if (!budgetData.expenses || !Array.isArray(budgetData.expenses[dateStr])) return;
+    budgetData.expenses[dateStr] = budgetData.expenses[dateStr].filter((e) => e.id !== entryId);
+    if (budgetData.expenses[dateStr].length === 0) delete budgetData.expenses[dateStr];
     debouncedSave();
     renderSummary();
     renderCalendar();
@@ -859,8 +880,9 @@ async function startNewMonth() {
 
     if (!newBudget.amount) newBudget.amount = oldBudgetAmount;
 
-    for (const [day, amount] of Object.entries(expensesToMove)) {
-        newBudget.expenses[day] = (newBudget.expenses[day] || 0) + amount;
+    for (const [day, entries] of Object.entries(expensesToMove)) {
+        if (!Array.isArray(newBudget.expenses[day])) newBudget.expenses[day] = [];
+        newBudget.expenses[day] = [...newBudget.expenses[day], ...entries];
     }
 
     budgetData = newBudget;

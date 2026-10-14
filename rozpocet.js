@@ -1351,7 +1351,7 @@ function renderSubs() {
     subsSummaryEl.textContent = "Předplatná" + (subs.length ? " · " + subs.length + " · " + fmtMoney(total) + " / měs." : "");
 
     subsListEl.replaceChildren();
-    subs.forEach((sub) => {
+    [...subs].sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, "cs")).forEach((sub) => {
         if (editingSubId === sub.id) {
             subsListEl.appendChild(createSubEditRow(sub));
             return;

@@ -1,14 +1,18 @@
 // Rozpočet – sledování měsíčního rozpočtu (výchozí období 14. – 13., s možností vlastního začátku)
-import { db } from "./firebase-init.js";
+import { db } from "./firebase-init.js?v=42169443";
 import {
     doc,
     setDoc,
     getDoc,
+    getDocs,
+    collection,
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js";
+import { initNavigation } from "./navigation.js?v=476675d6";
+import * as logic from "./budget-logic.js?v=c61516c0";
+const { fmtDate } = logic;
 
-const REQUIRED_IDS = ["bulk-bar", "subs-box", "tpl-btn-actual", "tpl-btn-predict", "bulk-btn-actual", "bulk-btn-predict", "newmonth-confirm"];
+const REQUIRED_IDS = ["breakdown-box", "copy-prev-btn", "export-csv", "subs-until", "bulk-bar", "subs-box", "tpl-btn-actual", "tpl-btn-predict", "bulk-btn-actual", "bulk-btn-predict", "newmonth-confirm"];
 if (REQUIRED_IDS.some((id) => !document.getElementById(id))) {
     try {
         if (!sessionStorage.getItem("rozpocet.reloaded")) {
@@ -60,6 +64,8 @@ const statSpentEl = document.getElementById("stat-spent");
 const statRemainingValueEl = document.getElementById("stat-remaining-value");
 const statRemainingArrowEl = document.getElementById("stat-remaining-arrow");
 const statDailyEl = document.getElementById("stat-daily");
+const breakdownSummaryEl = document.getElementById("breakdown-summary");
+const breakdownListEl = document.getElementById("breakdown-list");
 const newMonthBtn = document.getElementById("new-month-btn");
 const newMonthConfirmEl = document.getElementById("newmonth-confirm");
 const newMonthYesBtn = document.getElementById("newmonth-yes");
@@ -76,35 +82,11 @@ const predStatUnplannedEl = document.getElementById("pred-stat-unplanned");
 
 // ----- Období -----
 function buildBoundaries() {
-    const now = new Date();
-    const natural = new Set();
-    for (let m = -36; m <= 24; m++) {
-        const d = new Date(now.getFullYear(), now.getMonth() + m, 14);
-        natural.add(fmtDate(d));
-    }
-    for (const cs of customStarts) {
-        const [y, mo, d] = cs.split("-").map(Number);
-        const csDate = new Date(y, mo - 1, d);
-        if (csDate.getDate() === 14) continue;
-        let next14;
-        if (csDate.getDate() < 14) {
-            next14 = new Date(csDate.getFullYear(), csDate.getMonth(), 14);
-        } else {
-            next14 = new Date(csDate.getFullYear(), csDate.getMonth() + 1, 14);
-        }
-        natural.delete(fmtDate(next14));
-    }
-    const all = [...natural, ...customStarts];
-    all.sort();
-    return [...new Set(all)];
+    return logic.buildBoundaries(new Date(), customStarts);
 }
 
 function findCurrentIndex(boundaries) {
-    const today = fmtDate(new Date());
-    for (let i = boundaries.length - 1; i >= 0; i--) {
-        if (boundaries[i] <= today) return i;
-    }
-    return 0;
+    return logic.findCurrentIndex(boundaries, fmtDate(new Date()));
 }
 
 function computePeriod(offset) {
@@ -137,13 +119,6 @@ function computePeriod(offset) {
         periodDays.push(fmtDate(d));
         d.setDate(d.getDate() + 1);
     }
-}
-
-function fmtDate(d) {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return yyyy + "-" + mm + "-" + dd;
 }
 
 function fmtDateCZ(dateStr) {
@@ -188,17 +163,7 @@ function genId() {
 }
 
 function migrateExpenses(expenses) {
-    if (!expenses) return {};
-    const out = {};
-    for (const [key, val] of Object.entries(expenses)) {
-        if (Array.isArray(val)) {
-            // already new format, ensure each entry has an id
-            out[key] = val.map(e => ({ id: e.id || genId(), amount: e.amount || 0, desc: e.desc || "" }));
-        } else if (typeof val === "number" && val > 0) {
-            out[key] = [{ id: genId(), amount: val, desc: "" }];
-        }
-    }
-    return out;
+    return logic.migrateEntries(expenses, genId);
 }
 
 async function persistBudgetData() {
@@ -228,7 +193,7 @@ function debouncedSave() {
 function daySpent(dateStr) {
     const entries = budgetData.expenses && budgetData.expenses[dateStr];
     let sum = Array.isArray(entries) ? entries.reduce((s, e) => s + (e.amount || 0), 0) : 0;
-    if (dateStr <= fmtDate(new Date())) sum += subsSum(dateStr);
+    sum += subsChargedSum(dateStr);
     return sum;
 }
 
@@ -465,7 +430,49 @@ function renderPeriod() {
         fmtDateCZ(fmtDate(periodStart)) + " – " + fmtDateCZ(fmtDate(periodEnd));
 }
 
+function renderBreakdown() {
+    const items = [];
+    const today = fmtDate(new Date());
+    for (const day of periodDays) {
+        for (const e of (budgetData.expenses && budgetData.expenses[day]) || []) items.push(e);
+        for (const sub of subsOn(day)) {
+            if (logic.subCharged(sub, day, today)) items.push({ desc: sub.name, amount: sub.amount });
+        }
+    }
+    const groups = logic.aggregateByDesc(items);
+    breakdownSummaryEl.textContent = "Výdaje podle popisu" + (groups.length ? " · " + groups.length : "");
+    setChildren(breakdownListEl);
+    if (groups.length === 0) {
+        const p = document.createElement("p");
+        p.className = "budget-modal-hint";
+        p.textContent = "V tomto období zatím nejsou žádné výdaje.";
+        breakdownListEl.appendChild(p);
+        return;
+    }
+    const max = groups[0].total || 1;
+    groups.forEach((g) => {
+        const row = document.createElement("div");
+        row.className = "breakdown-row";
+        const label = document.createElement("span");
+        label.className = "breakdown-label";
+        label.textContent = g.label + (g.count > 1 ? " (" + g.count + "×)" : "");
+        const value = document.createElement("strong");
+        value.textContent = fmtMoney(g.total);
+        const bar = document.createElement("div");
+        bar.className = "breakdown-bar";
+        const fill = document.createElement("div");
+        fill.className = "breakdown-fill";
+        fill.style.width = Math.max(2, Math.round((g.total / max) * 100)) + "%";
+        bar.appendChild(fill);
+        row.appendChild(label);
+        row.appendChild(value);
+        row.appendChild(bar);
+        breakdownListEl.appendChild(row);
+    });
+}
+
 function renderSummary() {
+    renderBreakdown();
     const total = budgetData.amount || 0;
     const spent = totalSpent();
     const remaining = total - spent;
@@ -737,7 +744,20 @@ const predictCtx = {
         afterPredictChange();
     },
     rerender: () => renderPredictCalendar(),
+    complete: (d, entry) => completePrediction(d, entry),
+    completeAll: (d) => (predictData[d] || []).filter((e) => !e.done).forEach((e) => completePrediction(d, e)),
 };
+
+function completePrediction(dateStr, entry) {
+    if (entry.done) return;
+    entry.done = true;
+    if (!budgetData.expenses) budgetData.expenses = {};
+    if (!Array.isArray(budgetData.expenses[dateStr])) budgetData.expenses[dateStr] = [];
+    budgetData.expenses[dateStr].push({ id: genId(), amount: entry.amount, desc: entry.desc || "" });
+    debouncedSave();
+    debouncedPredictSave();
+    render();
+}
 
 function afterPredictChange() {
     debouncedPredictSave();
@@ -814,6 +834,14 @@ function createBubble(dateStr, ctx) {
     card.appendChild(form);
 
     const entries = ctx.entries(dateStr);
+    if (ctx.completeAll && entries.some((e) => !e.done)) {
+        const all = document.createElement("button");
+        all.type = "button";
+        all.className = "budget-entry-cancel budget-complete-all";
+        all.textContent = "Převést vše na výdaje";
+        all.addEventListener("click", (e) => { e.stopPropagation(); ctx.completeAll(dateStr); });
+        card.appendChild(all);
+    }
     const subRows = subsOn(dateStr);
     if (entries.length > 0 || subRows.length > 0) {
         const list = document.createElement("div");
@@ -823,9 +851,23 @@ function createBubble(dateStr, ctx) {
             row.className = "budget-entry-row budget-entry-sub";
             const info = document.createElement("span");
             info.className = "budget-entry-info";
-            const pending = ctx.title === "Výdaje" && dateStr > fmtDate(new Date());
-            info.textContent = "🔁 " + fmtMoney(sub.amount) + " – " + sub.name + (pending ? " (zatím nezaúčtováno)" : "");
+            info.textContent = "🔁 " + fmtMoney(sub.amount) + " – " + sub.name;
             row.appendChild(info);
+            if (ctx.title === "Výdaje") {
+                const charged = logic.subCharged(sub, dateStr, fmtDate(new Date()));
+                const toggle = document.createElement("button");
+                toggle.type = "button";
+                toggle.className = "budget-entry-cancel budget-sub-paid" + (charged ? " is-paid" : "");
+                toggle.textContent = charged ? "✓ zaplaceno" : "nezaplaceno";
+                toggle.title = "Přepnout stav platby";
+                toggle.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    if (!sub.paid) sub.paid = {};
+                    sub.paid[dateStr] = !charged;
+                    subsChanged();
+                });
+                row.appendChild(toggle);
+            }
             list.appendChild(row);
         });
         entries.forEach((entry) => {
@@ -860,6 +902,25 @@ function createBubble(dateStr, ctx) {
             });
 
             row.appendChild(info);
+            if (ctx.complete) {
+                if (entry.done) {
+                    const tag = document.createElement("span");
+                    tag.className = "budget-done-tag";
+                    tag.textContent = "✓ převedeno";
+                    row.appendChild(tag);
+                } else {
+                    const done = document.createElement("button");
+                    done.type = "button";
+                    done.className = "budget-entry-cancel budget-sub-paid";
+                    done.textContent = "→ výdaj";
+                    done.title = "Převést na skutečný výdaj";
+                    done.addEventListener("click", (e) => {
+                        e.stopPropagation();
+                        ctx.complete(dateStr, entry);
+                    });
+                    row.appendChild(done);
+                }
+            }
             row.appendChild(editBtn);
             row.appendChild(delBtn);
             list.appendChild(row);
@@ -1346,6 +1407,7 @@ const subsNameEl = document.getElementById("subs-name");
 const subsAmountEl = document.getElementById("subs-amount");
 const subsDayEl = document.getElementById("subs-day");
 const subsSinceEl = document.getElementById("subs-since");
+const subsUntilEl = document.getElementById("subs-until");
 const subsAddBtn = document.getElementById("subs-add");
 
 function loadSubsLocal() {
@@ -1376,14 +1438,18 @@ async function persistSubs() {
 }
 
 function subsOn(dateStr) {
-    if (subs.length === 0) return [];
-    const [y, m, d] = dateStr.split("-").map(Number);
-    const dim = new Date(y, m, 0).getDate();
-    return subs.filter((s) => dateStr >= s.since && d === Math.min(s.day, dim));
+    return logic.subsOn(subs, dateStr);
 }
 
 function subsSum(dateStr) {
     return subsOn(dateStr).reduce((t, s) => t + s.amount, 0);
+}
+
+function subsChargedSum(dateStr) {
+    const today = fmtDate(new Date());
+    return subsOn(dateStr)
+        .filter((s) => logic.subCharged(s, dateStr, today))
+        .reduce((t, s) => t + s.amount, 0);
 }
 
 function currentPeriodStart() {
@@ -1412,7 +1478,7 @@ function renderSubs() {
 
         const info = document.createElement("span");
         info.className = "budget-entry-info";
-        info.textContent = sub.name + " – " + fmtMoney(sub.amount) + " (" + sub.day + ". v měsíci)";
+        info.textContent = sub.name + " – " + fmtMoney(sub.amount) + " (" + sub.day + ". v měsíci" + (sub.until ? ", do " + fmtDateCZ(sub.until) : "") + ")";
 
         const editBtn = document.createElement("button");
         editBtn.type = "button";
@@ -1461,6 +1527,12 @@ function createSubEditRow(sub) {
     day.inputMode = "numeric";
     day.value = sub.day;
 
+    const until = document.createElement("input");
+    until.type = "date";
+    until.className = "budget-entry-desc";
+    until.title = "Platí do (nepovinné)";
+    until.value = sub.until || "";
+
     const save = document.createElement("button");
     save.type = "button";
     save.className = "budget-entry-add";
@@ -1475,6 +1547,8 @@ function createSubEditRow(sub) {
         sub.name = n;
         sub.amount = a;
         sub.day = d;
+        if (until.value) sub.until = until.value;
+        else delete sub.until;
         editingSubId = null;
         subsChanged();
     });
@@ -1488,6 +1562,7 @@ function createSubEditRow(sub) {
     row.appendChild(name);
     row.appendChild(amt);
     row.appendChild(day);
+    row.appendChild(until);
     row.appendChild(save);
     row.appendChild(cancel);
     return row;
@@ -1506,11 +1581,13 @@ function addSubscription() {
         amount,
         day,
         since: subsSinceEl.value || currentPeriodStart(),
+        ...(subsUntilEl.value ? { until: subsUntilEl.value } : {}),
     });
     subsNameEl.value = "";
     subsAmountEl.value = "";
     subsDayEl.value = "";
     subsSinceEl.value = currentPeriodStart();
+    subsUntilEl.value = "";
     subsChanged();
 }
 
@@ -1708,6 +1785,119 @@ function createTemplateForm() {
     card.addEventListener("click", (e) => e.stopPropagation());
     return card;
 }
+
+// ----- Převzetí plánu z minulého období -----
+const copyPrevBtn = document.getElementById("copy-prev-btn");
+const copyPrevHint = document.getElementById("copy-prev-hint");
+
+async function copyFromPreviousPeriod() {
+    copyPrevHint.textContent = "";
+    const b = buildBoundaries();
+    const idx = findCurrentIndex(b) + periodOffset - 1;
+    if (idx < 0) { copyPrevHint.textContent = "Žádné předchozí období."; return; }
+    const prevStart = b[idx];
+    const prevKey = "predict-" + prevStart;
+    let prevPred = loadPredictLocal()[prevKey];
+    let prevAmount = (loadLocal()[prevStart] || {}).amount || 0;
+    if (currentUser) {
+        try {
+            const p = await getDoc(doc(db, "users", currentUser.uid, "budget", prevKey));
+            if (p.exists() && p.data().predictions) prevPred = p.data().predictions;
+            const a = await getDoc(doc(db, "users", currentUser.uid, "budget", prevStart));
+            if (a.exists()) prevAmount = a.data().amount || prevAmount;
+        } catch (err) { console.error(err); }
+    }
+    const { map } = logic.mapPredictionsToPeriod(migrateExpenses(prevPred), periodDays, genId);
+    let added = 0;
+    for (const [d, entries] of Object.entries(map)) {
+        for (const e of entries) {
+            const list = predictData[d] || (predictData[d] = []);
+            if (list.some((x) => x.amount === e.amount && x.desc === e.desc)) continue;
+            list.push(e);
+            added++;
+        }
+    }
+    let amountSet = false;
+    if (!budgetData.amount && prevAmount) {
+        budgetData.amount = prevAmount;
+        amountEl.value = prevAmount;
+        amountSet = true;
+        debouncedSave();
+    }
+    if (added === 0 && !amountSet) { copyPrevHint.textContent = "V minulém období není co převzít."; return; }
+    if (added > 0) debouncedPredictSave();
+    render();
+    copyPrevHint.textContent = "Převzato položek: " + added + (amountSet ? ", rozpočet " + fmtMoney(prevAmount) : "") + ".";
+}
+
+copyPrevBtn.addEventListener("click", (e) => { e.stopPropagation(); copyFromPreviousPeriod(); });
+
+// ----- Export a záloha -----
+const exportCsvBtn = document.getElementById("export-csv");
+const exportJsonBtn = document.getElementById("export-json");
+const exportHint = document.getElementById("export-hint");
+
+function downloadFile(name, mime, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: mime }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportCsv() {
+    const rows = [];
+    const today = fmtDate(new Date());
+    for (const day of periodDays) {
+        for (const e of (budgetData.expenses && budgetData.expenses[day]) || []) {
+            rows.push({ date: day, type: "Výdaj", amount: e.amount, desc: e.desc || "" });
+        }
+        for (const sub of subsOn(day)) {
+            if (logic.subCharged(sub, day, today)) rows.push({ date: day, type: "Předplatné", amount: sub.amount, desc: sub.name });
+        }
+        for (const e of predictData[day] || []) {
+            rows.push({ date: day, type: e.done ? "Plán (převedeno)" : "Plán", amount: e.amount, desc: e.desc || "" });
+        }
+    }
+    downloadFile("rozpocet-" + periodKey() + ".csv", "text/csv;charset=utf-8", logic.buildCsv(rows));
+    exportHint.textContent = "Staženo řádků: " + rows.length + ".";
+}
+
+async function exportAll() {
+    exportHint.textContent = "Připravuji zálohu…";
+    try {
+        clearTimeout(saveTimeout);
+        clearTimeout(predictSaveTimeout);
+        if (budgetData) await persistBudgetData();
+        await persistPredictData();
+    } catch (err) { console.error(err); }
+    const out = { version: 1, exportedAt: new Date().toISOString(), periods: {}, predictions: {}, subs, templates, customStarts };
+    try {
+        if (currentUser) {
+            const snap = await getDocs(collection(db, "users", currentUser.uid, "budget"));
+            snap.forEach((d) => {
+                if (d.id.startsWith("_")) return;
+                if (d.id.startsWith("predict-")) out.predictions[d.id] = d.data().predictions || {};
+                else out.periods[d.id] = d.data();
+            });
+        } else {
+            out.periods = loadLocal();
+            out.predictions = loadPredictLocal();
+        }
+    } catch (err) {
+        console.error(err);
+        exportHint.textContent = "Zálohu se nepodařilo vytvořit: " + err.message;
+        return;
+    }
+    downloadFile("rozpocet-zaloha-" + fmtDate(new Date()) + ".json", "application/json", JSON.stringify(out, null, 2));
+    exportHint.textContent = "Záloha stažena (období: " + Object.keys(out.periods).length + ").";
+}
+
+exportCsvBtn.addEventListener("click", () => { if (budgetData) exportCsv(); });
+exportJsonBtn.addEventListener("click", exportAll);
 
 // ----- Event listeners -----
 amountEl.addEventListener("input", onBudgetAmountChange);

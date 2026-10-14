@@ -1,0 +1,3 @@
+#!/bin/sh
+# Před commitem doplní verze souborů (cache-busting) a přidá změněné soubory do commitu.
+node tools/stamp-versions.mjs >/dev/null && git add -u -- '*.html' '*.js'

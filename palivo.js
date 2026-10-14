@@ -1,16 +1,16 @@
-import { db } from "./firebase-init.js";
+import { db } from "./firebase-init.js?v=42169443";
 import {
     doc,
     setDoc,
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js";
+import { initNavigation } from "./navigation.js?v=476675d6";
 
 const STORAGE_KEY = "recept.palivo.v1";
 
 let currentUser = null;
 let unsubData = null;
-let data = { consumption: 0, pricePerLiter: 0, people: [] };
+let data = { consumption: 0, pricePerLiter: 0, people: [], trips: [] };
 
 // DOM
 const kmEl = document.getElementById("fuel-km");
@@ -24,6 +24,8 @@ const assignMenu = document.getElementById("fuel-assign-menu");
 const peopleListEl = document.getElementById("fuel-people-list");
 const newPersonInput = document.getElementById("fuel-new-person-name");
 const newPersonBtn = document.getElementById("fuel-new-person-btn");
+const tripsBtn = document.getElementById("fuel-trips-btn");
+const tripsMenu = document.getElementById("fuel-trips-menu");
 
 // ----- Data -----
 function loadLocal() {
@@ -69,6 +71,7 @@ function loadData() {
                 data.consumption = d.consumption || data.consumption || 0;
                 data.pricePerLiter = d.pricePerLiter || data.pricePerLiter || 0;
                 data.people = Array.isArray(d.people) ? d.people : data.people;
+                data.trips = Array.isArray(d.trips) ? d.trips : data.trips;
             }
             applyDataToInputs();
             renderPeople();
@@ -82,6 +85,7 @@ function loadData() {
             data.consumption = saved.consumption || 0;
             data.pricePerLiter = saved.pricePerLiter || 0;
             data.people = Array.isArray(saved.people) ? saved.people : [];
+            data.trips = Array.isArray(saved.trips) ? saved.trips : [];
         }
         applyDataToInputs();
         renderPeople();
@@ -504,13 +508,106 @@ passEl.addEventListener("change", onCalcInput);
 consEl.addEventListener("change", onCalcInput);
 priceEl.addEventListener("change", onCalcInput);
 
+// ----- Šablony tras -----
+let tripsOpen = false;
+
+function closeTripsMenu() {
+    tripsOpen = false;
+    tripsMenu.classList.add("hidden");
+}
+
+function renderTripsMenu() {
+    tripsMenu.textContent = "";
+    if (!Array.isArray(data.trips)) data.trips = [];
+
+    if (data.trips.length === 0) {
+        const hint = document.createElement("div");
+        hint.className = "fuel-menu-hint";
+        hint.textContent = "Zatím žádné šablony tras.";
+        tripsMenu.appendChild(hint);
+    }
+
+    data.trips.forEach((trip) => {
+        const row = document.createElement("div");
+        row.className = "fuel-trip-row";
+
+        const use = document.createElement("button");
+        use.type = "button";
+        use.className = "fuel-menu-item";
+        use.textContent = trip.name + " – " + trip.km + " km, " + trip.passengers + " os.";
+        use.addEventListener("click", () => {
+            kmEl.value = trip.km;
+            passEl.value = trip.passengers;
+            recalc();
+            closeTripsMenu();
+        });
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "fuel-trip-del";
+        del.textContent = "✕";
+        del.setAttribute("aria-label", "Smazat šablonu trasy");
+        del.addEventListener("click", () => {
+            data.trips = data.trips.filter((t) => t.id !== trip.id);
+            debouncedSave();
+            renderTripsMenu();
+        });
+
+        row.appendChild(use);
+        row.appendChild(del);
+        tripsMenu.appendChild(row);
+    });
+
+    const form = document.createElement("div");
+    form.className = "fuel-trip-form";
+    const name = document.createElement("input");
+    name.type = "text";
+    name.className = "fuel-new-person-input";
+    name.placeholder = "Název trasy (např. Práce)";
+    name.maxLength = 40;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn btn-primary fuel-new-person-submit";
+    save.textContent = "Uložit aktuální";
+    const doSave = () => {
+        const km = parseFloat(kmEl.value) || 0;
+        const passengers = Math.max(1, parseInt(passEl.value) || 1);
+        const n = name.value.trim();
+        if (!n) { name.focus(); return; }
+        if (km <= 0) { kmEl.focus(); closeTripsMenu(); return; }
+        data.trips.push({ id: "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: n, km, passengers });
+        debouncedSave();
+        renderTripsMenu();
+    };
+    save.addEventListener("click", doSave);
+    name.addEventListener("keydown", (e) => { if (e.key === "Enter") doSave(); });
+    form.appendChild(name);
+    form.appendChild(save);
+    tripsMenu.appendChild(form);
+}
+
+tripsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeAssignMenu();
+    tripsOpen = !tripsOpen;
+    if (tripsOpen) {
+        renderTripsMenu();
+        tripsMenu.classList.remove("hidden");
+    } else {
+        closeTripsMenu();
+    }
+});
+tripsMenu.addEventListener("click", (e) => e.stopPropagation());
+
 assignBtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    closeTripsMenu();
     toggleAssignMenu();
 });
 
 document.addEventListener("click", () => {
     if (menuOpen) closeAssignMenu();
+    if (tripsOpen) closeTripsMenu();
 });
 
 newPersonBtn.addEventListener("click", addNewPerson);
@@ -524,6 +621,7 @@ if (saved) {
     data.consumption = saved.consumption || 0;
     data.pricePerLiter = saved.pricePerLiter || 0;
     data.people = Array.isArray(saved.people) ? saved.people : [];
+    data.trips = Array.isArray(saved.trips) ? saved.trips : [];
 }
 applyDataToInputs();
 renderPeople();

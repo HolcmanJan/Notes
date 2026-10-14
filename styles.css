@@ -1469,32 +1469,72 @@ body.has-bottom-nav {
 /* Záložky */
 .budget-tabs {
     display: flex;
-    gap: 0;
-    margin-bottom: 1rem;
-    border-bottom: 2px solid var(--border);
+    align-items: flex-end;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    border-bottom: 1px solid var(--border);
 }
 
 .budget-tab {
-    background: none;
-    border: none;
-    padding: 0.55rem 1.1rem;
-    font-size: 0.9rem;
+    flex: 1;
+    position: relative;
+    background: #e4e1d8;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 10px 10px 0 0;
+    padding: 0.35rem 0.75rem;
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
     font-weight: 600;
     font-family: inherit;
     color: var(--muted);
     cursor: pointer;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    transition: color 0.15s, border-color 0.15s;
+    box-shadow: inset 0 -6px 6px -6px rgba(0, 0, 0, 0.18);
+    transition: background 0.15s, color 0.15s;
 }
 
 .budget-tab:hover {
     color: var(--text);
+    background: #ece9e1;
 }
 
 .budget-tab.active {
+    z-index: 2;
+    margin-top: 0;
+    padding: 0.55rem 0.75rem 0.5rem;
+    margin-bottom: -1px;
+    background: var(--surface);
+    border-top: 3px solid var(--primary);
+    border-bottom: 1px solid var(--surface);
     color: var(--primary);
-    border-bottom-color: var(--primary);
+    box-shadow: none;
+    font-size: 0.95rem;
+}
+
+#panel-actual,
+#panel-predict {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    padding: 0.6rem;
+    margin-bottom: 1rem;
+}
+
+#panel-actual .budget-stat,
+#panel-predict .budget-stat,
+#panel-actual .subs-box,
+#panel-predict .subs-box {
+    background: var(--bg);
+}
+
+#panel-actual .budget-calendar,
+#panel-predict .budget-calendar {
+    border: none;
+    background: none;
+    padding: 0;
+    box-shadow: none;
 }
 
 /* Predikce – odchylka */
@@ -1524,15 +1564,15 @@ body.has-bottom-nav {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 1rem;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.6rem;
 }
 
 .budget-period-nav {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
 }
 
 .budget-nav-btn {
@@ -1604,13 +1644,14 @@ body.has-bottom-nav {
 .budget-input-row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
 }
 
 .budget-input-row label {
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
     white-space: nowrap;
 }
 
@@ -1621,11 +1662,11 @@ body.has-bottom-nav {
 }
 
 .budget-input-wrap input {
-    width: 140px;
-    padding: 0.5rem 0.75rem;
+    width: 90px;
+    padding: 0.3rem 0.5rem;
     border: 1px solid var(--border);
     border-radius: 8px;
-    font-size: 1.05rem;
+    font-size: 0.95rem;
     text-align: right;
     background: var(--surface);
     color: var(--text);
@@ -1902,10 +1943,6 @@ body.has-bottom-nav {
         font-size: 0.78rem;
     }
 
-    .budget-input-row {
-        flex-direction: column;
-        align-items: flex-start;
-    }
 }
 
 /* ============ Stránka Cvičení ============ */

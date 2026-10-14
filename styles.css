@@ -3674,3 +3674,114 @@ body.has-bottom-nav {
         font-size: 16px;
     }
 }
+
+/* ── Popup rozpočtu: pevná pozice, klávesnice s ním nehýbe ── */
+.budget-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1100;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: max(1rem, 12vh) 1rem 0;
+    background: rgba(0, 0, 0, 0.35);
+    overscroll-behavior: contain;
+}
+
+.budget-modal-backdrop.hidden {
+    display: none;
+}
+
+.budget-modal-card {
+    width: min(100%, 380px);
+    max-height: 70vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    padding: 0.85rem;
+}
+
+.budget-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+    font-size: 0.95rem;
+}
+
+.budget-modal-card .budget-entry-list {
+    margin: 0.65rem 0 0;
+    max-height: 40vh;
+}
+
+.budget-modal-hint {
+    margin: 0.6rem 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+/* ── Hromadné přidání ── */
+.bulk-btn {
+    display: block;
+    margin: 0 0 0.75rem auto;
+    padding: 0.4rem 0.8rem;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.bulk-btn:hover {
+    background: #f3f4f6;
+}
+
+.budget-cal-cell.budget-day-selected {
+    background: #bfdbfe;
+    border-color: #2563eb;
+    color: #1e3a8a;
+}
+
+.bulk-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    z-index: 950;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.6rem 1rem;
+    background: #eff6ff;
+    border-top: 2px solid #2563eb;
+    font-size: 0.85rem;
+}
+
+.bulk-bar.hidden {
+    display: none;
+}
+
+.bulk-bar-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.bulk-bar .budget-entry-add:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+body.bulk-active {
+    padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+}

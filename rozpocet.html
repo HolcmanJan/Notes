@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-visual">
     <title>Rozpočet</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -70,6 +70,8 @@
                 </div>
             </section>
 
+            <button type="button" class="bulk-btn" id="bulk-btn-actual">Hromadné přidání</button>
+
             <!-- Kalendář skutečnosti -->
             <section class="budget-calendar" id="budget-calendar"></section>
         </div>
@@ -96,10 +98,14 @@
                 </div>
             </section>
 
+            <button type="button" class="bulk-btn" id="bulk-btn-predict">Hromadné přidání</button>
+
             <!-- Predikční kalendář -->
             <section class="budget-calendar" id="predict-calendar"></section>
         </div>
     </main>
+
+    <div class="bulk-bar hidden" id="bulk-bar"></div>
 
     <script type="module" src="rozpocet.js"></script>
 </body>

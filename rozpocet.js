@@ -265,6 +265,8 @@ function goToPeriod(offset) {
     openDay = null;
     openPredictDay = null;
     editingEntryId = null;
+    bulk = null;
+    renderBulkBar();
     hideNewMonthConfirm();
     computePeriod(periodOffset);
 
@@ -389,6 +391,11 @@ function totalPredicted() {
 // ----- Záložky -----
 function switchTab(tab) {
     activeTab = tab;
+    bulk = null;
+    openDay = null;
+    openPredictDay = null;
+    editingEntryId = null;
+    renderBulkBar();
     tabActual.classList.toggle("active", tab === "actual");
     tabPredict.classList.toggle("active", tab === "predict");
     tabActual.setAttribute("aria-selected", tab === "actual");
@@ -400,10 +407,15 @@ function switchTab(tab) {
 
 // ----- Vykreslení -----
 function render() {
-    renderPeriod();
-    renderSummary();
-    renderCalendar();
-    if (activeTab === "predict") renderPredictPanel();
+    keepModalInputs = true;
+    try {
+        renderPeriod();
+        renderSummary();
+        renderCalendar();
+        if (activeTab === "predict") renderPredictPanel();
+    } finally {
+        keepModalInputs = false;
+    }
 }
 
 function renderPeriod() {
@@ -512,18 +524,17 @@ function renderCalendar() {
 
         cell.addEventListener("click", (e) => {
             e.stopPropagation();
-            toggleBubble(dateStr);
+            onDayClick("actual", dateStr);
         });
 
-        if (openDay === dateStr) {
-            cell.classList.add("budget-cell-open");
-            cell.appendChild(createBubble(dateStr, expenseCtx));
-        }
+        if (openDay === dateStr) cell.classList.add("budget-cell-open");
+        if (isBulkSelected("actual", dateStr)) cell.classList.add("budget-day-selected");
 
         grid.appendChild(cell);
     });
 
     calendarEl.appendChild(grid);
+    syncModal();
 }
 
 // ----- Predikční panel -----
@@ -637,27 +648,21 @@ function renderPredictCalendar() {
 
         cell.addEventListener("click", (e) => {
             e.stopPropagation();
-            togglePredictBubble(dateStr);
+            onDayClick("predict", dateStr);
         });
 
-        if (openPredictDay === dateStr) {
-            cell.classList.add("budget-cell-open");
-            cell.appendChild(createBubble(dateStr, predictCtx));
-        }
+        if (openPredictDay === dateStr) cell.classList.add("budget-cell-open");
+        if (isBulkSelected("predict", dateStr)) cell.classList.add("budget-day-selected");
 
         grid.appendChild(cell);
     });
 
     predictCalendarEl.appendChild(grid);
-}
-
-function togglePredictBubble(dateStr) {
-    openPredictDay = openPredictDay === dateStr ? null : dateStr;
-    editingEntryId = null;
-    renderPredictCalendar();
+    syncModal();
 }
 
 const predictCtx = {
+    title: "Plán",
     entries: (d) => predictData[d] || [],
     add: (d, amount, desc) => {
         if (!Array.isArray(predictData[d])) predictData[d] = [];
@@ -687,13 +692,8 @@ function afterPredictChange() {
 }
 
 // ----- Inline bublina (+/- ovládání) -----
-function toggleBubble(dateStr) {
-    openDay = openDay === dateStr ? null : dateStr;
-    editingEntryId = null;
-    renderCalendar();
-}
-
 const expenseCtx = {
+    title: "Výdaje",
     entries: (d) => (budgetData.expenses && budgetData.expenses[d]) || [],
     add: (d, amount, desc) => addEntry(d, amount, desc),
     update: (d, id, amount, desc) => updateEntry(d, id, amount, desc),
@@ -702,52 +702,22 @@ const expenseCtx = {
 };
 
 function createBubble(dateStr, ctx) {
-    const bubble = document.createElement("div");
-    bubble.className = "budget-bubble budget-bubble-entries";
+    const card = document.createElement("div");
+    card.className = "budget-modal-card";
 
-    const entries = ctx.entries(dateStr);
-
-    if (entries.length > 0) {
-        const list = document.createElement("div");
-        list.className = "budget-entry-list";
-        entries.forEach((entry) => {
-            if (editingEntryId === entry.id) {
-                list.appendChild(createEditRow(dateStr, entry, ctx));
-                return;
-            }
-            const row = document.createElement("div");
-            row.className = "budget-entry-row";
-
-            const info = document.createElement("span");
-            info.className = "budget-entry-info";
-            info.textContent = fmtMoney(entry.amount) + (entry.desc ? " – " + entry.desc : "");
-
-            const delBtn = document.createElement("button");
-            delBtn.type = "button";
-            delBtn.className = "budget-entry-del";
-            delBtn.textContent = "✕";
-            delBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                ctx.remove(dateStr, entry.id);
-            });
-
-            const editBtn = document.createElement("button");
-            editBtn.type = "button";
-            editBtn.className = "budget-entry-del budget-entry-edit";
-            editBtn.textContent = "✎";
-            editBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                editingEntryId = entry.id;
-                ctx.rerender();
-            });
-
-            row.appendChild(info);
-            row.appendChild(editBtn);
-            row.appendChild(delBtn);
-            list.appendChild(row);
-        });
-        bubble.appendChild(list);
-    }
+    const head = document.createElement("div");
+    head.className = "budget-modal-head";
+    const title = document.createElement("strong");
+    title.textContent = ctx.title + " – " + fmtDateCZ(dateStr);
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "budget-entry-del";
+    closeBtn.textContent = "✕";
+    closeBtn.setAttribute("aria-label", "Zavřít");
+    closeBtn.addEventListener("click", closeAllPopups);
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+    card.appendChild(head);
 
     const form = document.createElement("div");
     form.className = "budget-entry-form";
@@ -787,10 +757,53 @@ function createBubble(dateStr, ctx) {
     form.appendChild(amtInput);
     form.appendChild(descInput);
     form.appendChild(addBtn);
-    bubble.appendChild(form);
+    card.appendChild(form);
 
-    bubble.addEventListener("click", (e) => e.stopPropagation());
-    return bubble;
+    const entries = ctx.entries(dateStr);
+    if (entries.length > 0) {
+        const list = document.createElement("div");
+        list.className = "budget-entry-list";
+        entries.forEach((entry) => {
+            if (editingEntryId === entry.id) {
+                list.appendChild(createEditRow(dateStr, entry, ctx));
+                return;
+            }
+            const row = document.createElement("div");
+            row.className = "budget-entry-row";
+
+            const info = document.createElement("span");
+            info.className = "budget-entry-info";
+            info.textContent = fmtMoney(entry.amount) + (entry.desc ? " – " + entry.desc : "");
+
+            const editBtn = document.createElement("button");
+            editBtn.type = "button";
+            editBtn.className = "budget-entry-del budget-entry-edit";
+            editBtn.textContent = "✎";
+            editBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                editingEntryId = entry.id;
+                ctx.rerender();
+            });
+
+            const delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "budget-entry-del";
+            delBtn.textContent = "✕";
+            delBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                ctx.remove(dateStr, entry.id);
+            });
+
+            row.appendChild(info);
+            row.appendChild(editBtn);
+            row.appendChild(delBtn);
+            list.appendChild(row);
+        });
+        card.appendChild(list);
+    }
+
+    card.addEventListener("click", (e) => e.stopPropagation());
+    return card;
 }
 
 function createEditRow(dateStr, entry, ctx) {
@@ -876,18 +889,267 @@ function removeEntry(dateStr, entryId) {
     renderCalendar();
 }
 
-document.addEventListener("click", () => {
-    if (openDay !== null) {
-        openDay = null;
-        editingEntryId = null;
-        renderCalendar();
+function closeAllPopups() {
+    const hadDay = openDay !== null;
+    const hadPredict = openPredictDay !== null;
+    const hadBulkForm = bulk && bulk.step === "form";
+    openDay = null;
+    openPredictDay = null;
+    editingEntryId = null;
+    if (hadBulkForm) bulk = null;
+    if (hadDay) renderCalendar();
+    if (hadPredict) renderPredictCalendar();
+    if (hadBulkForm) { renderCalendar(); renderPredictCalendar(); }
+    syncModal();
+    renderBulkBar();
+}
+
+document.addEventListener("click", closeAllPopups);
+
+// ----- Modální okno (pevná pozice, klávesnice s ním nehýbe) -----
+const modalHost = document.createElement("div");
+modalHost.className = "budget-modal-backdrop hidden";
+document.body.appendChild(modalHost);
+
+function syncModal() {
+    let card = null;
+    if (bulk && bulk.step === "form") card = createBulkForm();
+    else if (!bulk && activeTab === "actual" && openDay) card = createBubble(openDay, expenseCtx);
+    else if (!bulk && activeTab === "predict" && openPredictDay) card = createBubble(openPredictDay, predictCtx);
+
+    if (!card) {
+        modalHost.classList.add("hidden");
+        modalHost.replaceChildren();
+        return;
     }
-    if (openPredictDay !== null) {
-        openPredictDay = null;
-        editingEntryId = null;
+    const saved = keepModalInputs ? captureModalInputs() : null;
+    modalHost.replaceChildren(card);
+    modalHost.classList.remove("hidden");
+    if (saved) restoreModalInputs(saved);
+}
+
+let keepModalInputs = false;
+
+function captureModalInputs() {
+    const inputs = [...modalHost.querySelectorAll("input")];
+    if (inputs.length === 0) return null;
+    return { values: inputs.map((i) => i.value), focus: inputs.indexOf(document.activeElement) };
+}
+
+function restoreModalInputs(saved) {
+    const inputs = [...modalHost.querySelectorAll("input")];
+    if (inputs.length !== saved.values.length) return;
+    inputs.forEach((inp, i) => { inp.value = saved.values[i]; });
+    if (saved.focus >= 0) inputs[saved.focus].focus();
+}
+
+// ----- Hromadné přidání -----
+let bulk = null; // { kind, step: "form" | "select", amount, desc, days: Set }
+const bulkBarEl = document.getElementById("bulk-bar");
+
+function isBulkSelected(kind, dateStr) {
+    return !!(bulk && bulk.step === "select" && bulk.kind === kind && bulk.days.has(dateStr));
+}
+
+function rerenderKind(kind) {
+    if (kind === "actual") renderCalendar();
+    else renderPredictCalendar();
+}
+
+function onDayClick(kind, dateStr) {
+    if (bulk) {
+        if (bulk.step !== "select" || bulk.kind !== kind) return;
+        if (bulk.days.has(dateStr)) bulk.days.delete(dateStr);
+        else bulk.days.add(dateStr);
+        rerenderKind(kind);
+        renderBulkBar();
+        return;
+    }
+    editingEntryId = null;
+    if (kind === "actual") {
+        openDay = openDay === dateStr ? null : dateStr;
+        renderCalendar();
+    } else {
+        openPredictDay = openPredictDay === dateStr ? null : dateStr;
         renderPredictCalendar();
     }
-});
+}
+
+function startBulk(kind) {
+    openDay = null;
+    openPredictDay = null;
+    editingEntryId = null;
+    bulk = { kind, step: "form", amount: 0, desc: "", days: new Set() };
+    renderCalendar();
+    renderPredictCalendar();
+    renderBulkBar();
+}
+
+function cancelBulk() {
+    if (!bulk) return;
+    bulk = null;
+    renderCalendar();
+    renderPredictCalendar();
+    renderBulkBar();
+}
+
+function createBulkForm() {
+    const card = document.createElement("div");
+    card.className = "budget-modal-card";
+
+    const head = document.createElement("div");
+    head.className = "budget-modal-head";
+    const title = document.createElement("strong");
+    title.textContent = "Hromadné přidání – " + (bulk.kind === "actual" ? "výdaje" : "plán");
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "budget-entry-del";
+    closeBtn.textContent = "✕";
+    closeBtn.setAttribute("aria-label", "Zavřít");
+    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); cancelBulk(); });
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+    card.appendChild(head);
+
+    const form = document.createElement("div");
+    form.className = "budget-entry-form";
+
+    const amt = document.createElement("input");
+    amt.type = "number";
+    amt.className = "budget-entry-amt";
+    amt.placeholder = "Kč";
+    amt.min = "0";
+    amt.step = "1";
+    amt.inputMode = "numeric";
+    if (bulk.amount) amt.value = bulk.amount;
+
+    const desc = document.createElement("input");
+    desc.type = "text";
+    desc.className = "budget-entry-desc";
+    desc.placeholder = "Popis…";
+    desc.maxLength = 60;
+    desc.value = bulk.desc;
+
+    form.appendChild(amt);
+    form.appendChild(desc);
+    card.appendChild(form);
+
+    const hint = document.createElement("p");
+    hint.className = "budget-modal-hint";
+    hint.textContent = "Po kliknutí na Dál označ v kalendáři dny, kterým se částka přidá.";
+    card.appendChild(hint);
+
+    const actions = document.createElement("div");
+    actions.className = "budget-confirm-actions";
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "budget-entry-add";
+    next.textContent = "Dál – vybrat dny";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "budget-entry-cancel";
+    cancel.textContent = "Zrušit";
+
+    const goNext = (e) => {
+        e.stopPropagation();
+        const v = parseFloat(amt.value);
+        if (!v || v <= 0) { amt.focus(); return; }
+        bulk.amount = v;
+        bulk.desc = desc.value.trim();
+        bulk.step = "select";
+        syncModal();
+        renderBulkBar();
+    };
+    next.addEventListener("click", goNext);
+    cancel.addEventListener("click", (e) => { e.stopPropagation(); cancelBulk(); });
+    [amt, desc].forEach((inp) => {
+        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") goNext(e); });
+        inp.addEventListener("click", (e) => e.stopPropagation());
+    });
+    actions.appendChild(next);
+    actions.appendChild(cancel);
+    card.appendChild(actions);
+
+    card.addEventListener("click", (e) => e.stopPropagation());
+    return card;
+}
+
+function renderBulkBar() {
+    if (!bulk || bulk.step !== "select") {
+        bulkBarEl.classList.add("hidden");
+        bulkBarEl.replaceChildren();
+        document.body.classList.remove("bulk-active");
+        return;
+    }
+    const count = bulk.days.size;
+
+    const info = document.createElement("div");
+    info.className = "bulk-bar-info";
+    const line1 = document.createElement("strong");
+    line1.textContent = fmtMoney(bulk.amount) + (bulk.desc ? " – " + bulk.desc : "");
+    const line2 = document.createElement("span");
+    line2.textContent = count === 0
+        ? "Klikni v kalendáři na dny (min. 1)"
+        : "Vybráno dnů: " + count + " · celkem " + fmtMoney(bulk.amount * count);
+    info.appendChild(line1);
+    info.appendChild(line2);
+
+    const actions = document.createElement("div");
+    actions.className = "budget-confirm-actions";
+
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "budget-entry-add";
+    apply.textContent = "Přidat";
+    apply.disabled = count === 0;
+    apply.addEventListener("click", (e) => { e.stopPropagation(); applyBulk(); });
+
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "budget-entry-cancel";
+    edit.textContent = "Upravit";
+    edit.addEventListener("click", (e) => { e.stopPropagation(); bulk.step = "form"; syncModal(); renderBulkBar(); });
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "budget-entry-cancel";
+    cancel.textContent = "Zrušit";
+    cancel.addEventListener("click", (e) => { e.stopPropagation(); cancelBulk(); });
+
+    actions.appendChild(apply);
+    actions.appendChild(edit);
+    actions.appendChild(cancel);
+
+    bulkBarEl.replaceChildren(info, actions);
+    bulkBarEl.classList.remove("hidden");
+    document.body.classList.add("bulk-active");
+}
+
+function applyBulk() {
+    if (!bulk || bulk.days.size === 0) return;
+    const { kind, amount, desc } = bulk;
+    const days = [...bulk.days];
+    if (kind === "actual") {
+        if (!budgetData.expenses) budgetData.expenses = {};
+        for (const d of days) {
+            if (!Array.isArray(budgetData.expenses[d])) budgetData.expenses[d] = [];
+            budgetData.expenses[d].push({ id: genId(), amount, desc });
+        }
+        debouncedSave();
+    } else {
+        for (const d of days) {
+            if (!Array.isArray(predictData[d])) predictData[d] = [];
+            predictData[d].push({ id: genId(), amount, desc });
+        }
+        debouncedPredictSave();
+    }
+    bulk = null;
+    renderSummary();
+    renderCalendar();
+    renderPredictSummary();
+    renderPredictCalendar();
+    renderBulkBar();
+}
 
 function fmtMoney(n) {
     return n.toLocaleString("cs-CZ") + " Kč";
@@ -1005,6 +1267,8 @@ newMonthYesBtn.addEventListener("click", startNewMonth);
 newMonthNoBtn.addEventListener("click", hideNewMonthConfirm);
 tabActual.addEventListener("click", () => switchTab("actual"));
 tabPredict.addEventListener("click", () => switchTab("predict"));
+document.getElementById("bulk-btn-actual").addEventListener("click", (e) => { e.stopPropagation(); startBulk("actual"); });
+document.getElementById("bulk-btn-predict").addEventListener("click", (e) => { e.stopPropagation(); startBulk("predict"); });
 
 // ----- Inicializace -----
 customStarts = loadCustomStartsLocal();

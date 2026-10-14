@@ -980,6 +980,8 @@ function syncModal() {
         setChildren(modalHost);
         return;
     }
+    const isDayPopup = !tplFormKind && !bulk;
+    modalHost.classList.toggle("budget-modal-passthrough", isDayPopup);
     const saved = keepModalInputs ? captureModalInputs() : null;
     setChildren(modalHost, card);
     modalHost.classList.remove("hidden");

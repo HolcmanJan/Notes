@@ -11,14 +11,12 @@ import { initNavigation } from "./navigation.js";
 const STORAGE_KEY = "recept.budget.v1";
 const CUSTOM_STARTS_KEY = "recept.budget.customStarts";
 const PREDICT_STORAGE_KEY = "recept.budget.predict.v1";
-const STEP = 10;
-const STEP_LG = 50;
 
 // ----- Stav -----
 let currentUser = null;
 let unsubscribeBudget = null;
 let budgetData = null; // { amount, expenses: { "YYYY-MM-DD": [{id, amount, desc}] } }
-let predictData = {};  // { "YYYY-MM-DD": number } — plánované výdaje
+let predictData = {};  // { "YYYY-MM-DD": [{id, amount, desc}] } — plánované výdaje
 let periodStart = null;
 let periodEnd = null;
 let periodDays = [];
@@ -298,7 +296,7 @@ function loadPeriodData() {
         const predRef = doc(db, "users", currentUser.uid, "budget", predictKey());
         getDoc(predRef).then((snap) => {
             if (snap.exists() && snap.data().predictions) {
-                predictData = snap.data().predictions;
+                predictData = migrateExpenses(snap.data().predictions);
                 savePredictLocal({ ...loadPredictLocal(), [predictKey()]: predictData });
                 if (activeTab === "predict") renderPredictPanel();
             }
@@ -355,7 +353,7 @@ function savePredictLocal(allPredict) {
 
 function loadPredictForPeriod() {
     const allPredict = loadPredictLocal();
-    predictData = allPredict[predictKey()] || {};
+    predictData = migrateExpenses(allPredict[predictKey()]);
 }
 
 async function persistPredictData() {
@@ -377,7 +375,9 @@ function debouncedPredictSave() {
 }
 
 function dayPredicted(dateStr) {
-    return predictData[dateStr] || 0;
+    const entries = predictData[dateStr];
+    if (!Array.isArray(entries)) return 0;
+    return entries.reduce((s, e) => s + (e.amount || 0), 0);
 }
 
 function totalPredicted() {
@@ -517,7 +517,7 @@ function renderCalendar() {
 
         if (openDay === dateStr) {
             cell.classList.add("budget-cell-open");
-            cell.appendChild(createBubble(dateStr));
+            cell.appendChild(createBubble(dateStr, expenseCtx));
         }
 
         grid.appendChild(cell);
@@ -642,7 +642,7 @@ function renderPredictCalendar() {
 
         if (openPredictDay === dateStr) {
             cell.classList.add("budget-cell-open");
-            cell.appendChild(createPredictBubble(dateStr));
+            cell.appendChild(createBubble(dateStr, predictCtx));
         }
 
         grid.appendChild(cell);
@@ -653,103 +653,34 @@ function renderPredictCalendar() {
 
 function togglePredictBubble(dateStr) {
     openPredictDay = openPredictDay === dateStr ? null : dateStr;
+    editingEntryId = null;
     renderPredictCalendar();
 }
 
-function createPredictBubble(dateStr) {
-    const bubble = document.createElement("div");
-    bubble.className = "budget-bubble";
+const predictCtx = {
+    entries: (d) => predictData[d] || [],
+    add: (d, amount, desc) => {
+        if (!Array.isArray(predictData[d])) predictData[d] = [];
+        predictData[d].push({ id: genId(), amount, desc });
+        afterPredictChange();
+    },
+    update: (d, id, amount, desc) => {
+        const entry = (predictData[d] || []).find((e) => e.id === id);
+        if (!entry) return;
+        entry.amount = amount;
+        entry.desc = desc;
+        editingEntryId = null;
+        afterPredictChange();
+    },
+    remove: (d, id) => {
+        predictData[d] = (predictData[d] || []).filter((e) => e.id !== id);
+        if (predictData[d].length === 0) delete predictData[d];
+        afterPredictChange();
+    },
+    rerender: () => renderPredictCalendar(),
+};
 
-    const row1 = document.createElement("div");
-    row1.className = "budget-bubble-row";
-
-    const minus10 = document.createElement("button");
-    minus10.type = "button";
-    minus10.className = "budget-bubble-btn";
-    minus10.textContent = "−";
-    minus10.addEventListener("click", (e) => { e.stopPropagation(); changePrediction(dateStr, -STEP); });
-
-    const valueEl = document.createElement("span");
-    valueEl.className = "budget-bubble-value";
-    valueEl.textContent = fmtMoney(dayPredicted(dateStr));
-
-    const plus10 = document.createElement("button");
-    plus10.type = "button";
-    plus10.className = "budget-bubble-btn";
-    plus10.textContent = "+";
-    plus10.addEventListener("click", (e) => { e.stopPropagation(); changePrediction(dateStr, STEP); });
-
-    row1.appendChild(minus10);
-    row1.appendChild(valueEl);
-    row1.appendChild(plus10);
-
-    const row2 = document.createElement("div");
-    row2.className = "budget-bubble-row";
-
-    const minus50 = document.createElement("button");
-    minus50.type = "button";
-    minus50.className = "budget-bubble-btn budget-bubble-btn-lg";
-    minus50.textContent = "−50";
-    minus50.addEventListener("click", (e) => { e.stopPropagation(); changePrediction(dateStr, -STEP_LG); });
-
-    const plus50 = document.createElement("button");
-    plus50.type = "button";
-    plus50.className = "budget-bubble-btn budget-bubble-btn-lg";
-    plus50.textContent = "+50";
-    plus50.addEventListener("click", (e) => { e.stopPropagation(); changePrediction(dateStr, STEP_LG); });
-
-    row2.appendChild(minus50);
-    row2.appendChild(plus50);
-
-    const row3 = document.createElement("div");
-    row3.className = "budget-entry-form";
-
-    const directInput = document.createElement("input");
-    directInput.type = "number";
-    directInput.className = "budget-entry-amt";
-    directInput.placeholder = "Částka";
-    directInput.min = "0";
-    directInput.step = "1";
-    directInput.inputMode = "numeric";
-
-    const setBtn = document.createElement("button");
-    setBtn.type = "button";
-    setBtn.className = "budget-entry-add";
-    setBtn.textContent = "Nastavit";
-
-    const doSet = (e) => {
-        e.stopPropagation();
-        const v = parseFloat(directInput.value);
-        if (isNaN(v) || v < 0) { directInput.focus(); return; }
-        setPrediction(dateStr, v);
-    };
-    setBtn.addEventListener("click", doSet);
-    directInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doSet(e); });
-    directInput.addEventListener("click", (e) => e.stopPropagation());
-
-    row3.appendChild(directInput);
-    row3.appendChild(setBtn);
-
-    bubble.appendChild(row1);
-    bubble.appendChild(row2);
-    bubble.appendChild(row3);
-    bubble.addEventListener("click", (e) => e.stopPropagation());
-    return bubble;
-}
-
-function setPrediction(dateStr, value) {
-    if (value === 0) delete predictData[dateStr];
-    else predictData[dateStr] = value;
-    debouncedPredictSave();
-    renderPredictSummary();
-    renderPredictCalendar();
-}
-
-function changePrediction(dateStr, delta) {
-    const current = predictData[dateStr] || 0;
-    const next = Math.max(0, current + delta);
-    if (next === 0) delete predictData[dateStr];
-    else predictData[dateStr] = next;
+function afterPredictChange() {
     debouncedPredictSave();
     renderPredictSummary();
     renderPredictCalendar();
@@ -762,18 +693,26 @@ function toggleBubble(dateStr) {
     renderCalendar();
 }
 
-function createBubble(dateStr) {
+const expenseCtx = {
+    entries: (d) => (budgetData.expenses && budgetData.expenses[d]) || [],
+    add: (d, amount, desc) => addEntry(d, amount, desc),
+    update: (d, id, amount, desc) => updateEntry(d, id, amount, desc),
+    remove: (d, id) => removeEntry(d, id),
+    rerender: () => renderCalendar(),
+};
+
+function createBubble(dateStr, ctx) {
     const bubble = document.createElement("div");
     bubble.className = "budget-bubble budget-bubble-entries";
 
-    const entries = (budgetData.expenses && budgetData.expenses[dateStr]) || [];
+    const entries = ctx.entries(dateStr);
 
     if (entries.length > 0) {
         const list = document.createElement("div");
         list.className = "budget-entry-list";
         entries.forEach((entry) => {
             if (editingEntryId === entry.id) {
-                list.appendChild(createEditRow(dateStr, entry));
+                list.appendChild(createEditRow(dateStr, entry, ctx));
                 return;
             }
             const row = document.createElement("div");
@@ -789,7 +728,7 @@ function createBubble(dateStr) {
             delBtn.textContent = "✕";
             delBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
-                removeEntry(dateStr, entry.id);
+                ctx.remove(dateStr, entry.id);
             });
 
             const editBtn = document.createElement("button");
@@ -799,7 +738,7 @@ function createBubble(dateStr) {
             editBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 editingEntryId = entry.id;
-                renderCalendar();
+                ctx.rerender();
             });
 
             row.appendChild(info);
@@ -836,7 +775,7 @@ function createBubble(dateStr) {
         e.stopPropagation();
         const amount = parseFloat(amtInput.value);
         if (!amount || amount <= 0) { amtInput.focus(); return; }
-        addEntry(dateStr, amount, descInput.value.trim());
+        ctx.add(dateStr, amount, descInput.value.trim());
     };
 
     addBtn.addEventListener("click", doAdd);
@@ -854,7 +793,7 @@ function createBubble(dateStr) {
     return bubble;
 }
 
-function createEditRow(dateStr, entry) {
+function createEditRow(dateStr, entry, ctx) {
     const row = document.createElement("div");
     row.className = "budget-entry-row budget-entry-editing";
 
@@ -886,13 +825,13 @@ function createEditRow(dateStr, entry) {
         e.stopPropagation();
         const v = parseFloat(amt.value);
         if (!v || v <= 0) { amt.focus(); return; }
-        updateEntry(dateStr, entry.id, v, desc.value.trim());
+        ctx.update(dateStr, entry.id, v, desc.value.trim());
     };
     save.addEventListener("click", doSave);
     cancel.addEventListener("click", (e) => {
         e.stopPropagation();
         editingEntryId = null;
-        renderCalendar();
+        ctx.rerender();
     });
     [amt, desc].forEach((inp) => {
         inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doSave(e); });
@@ -945,6 +884,7 @@ document.addEventListener("click", () => {
     }
     if (openPredictDay !== null) {
         openPredictDay = null;
+        editingEntryId = null;
         renderPredictCalendar();
     }
 });

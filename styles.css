@@ -3661,3 +3661,16 @@ body.has-bottom-nav {
 .budget-bubble .budget-entry-form {
     margin-top: 0.4rem;
 }
+
+/* Zabrání automatickému přiblížení na mobilu při fokusu inputu (iOS zoomuje při písmu < 16px) */
+@media (pointer: coarse) {
+    input[type="text"],
+    input[type="number"],
+    input[type="search"],
+    input[type="email"],
+    input[type="password"],
+    textarea,
+    select {
+        font-size: 16px;
+    }
+}

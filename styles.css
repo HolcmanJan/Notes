@@ -1469,23 +1469,26 @@ body.has-bottom-nav {
 /* Záložky */
 .budget-tabs {
     display: flex;
-    gap: 0;
-    margin-bottom: 1rem;
-    border-bottom: 2px solid var(--border);
+    gap: 0.25rem;
+    margin-bottom: 0.75rem;
+    padding: 0 0.25rem;
+    border-bottom: 2px solid var(--primary);
 }
 
 .budget-tab {
-    background: none;
-    border: none;
-    padding: 0.55rem 1.1rem;
+    flex: 1;
+    background: #f1efe9;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 10px 10px 0 0;
+    padding: 0.5rem 0.75rem;
     font-size: 0.9rem;
     font-weight: 600;
     font-family: inherit;
     color: var(--muted);
     cursor: pointer;
-    border-bottom: 2px solid transparent;
     margin-bottom: -2px;
-    transition: color 0.15s, border-color 0.15s;
+    transition: background 0.15s, color 0.15s;
 }
 
 .budget-tab:hover {
@@ -1493,8 +1496,9 @@ body.has-bottom-nav {
 }
 
 .budget-tab.active {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
 }
 
 /* Predikce – odchylka */
@@ -1524,15 +1528,15 @@ body.has-bottom-nav {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 1rem;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.6rem;
 }
 
 .budget-period-nav {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
 }
 
 .budget-nav-btn {
@@ -1604,13 +1608,14 @@ body.has-bottom-nav {
 .budget-input-row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
 }
 
 .budget-input-row label {
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
     white-space: nowrap;
 }
 
@@ -1621,11 +1626,11 @@ body.has-bottom-nav {
 }
 
 .budget-input-wrap input {
-    width: 140px;
-    padding: 0.5rem 0.75rem;
+    width: 90px;
+    padding: 0.3rem 0.5rem;
     border: 1px solid var(--border);
     border-radius: 8px;
-    font-size: 1.05rem;
+    font-size: 0.95rem;
     text-align: right;
     background: var(--surface);
     color: var(--text);
@@ -1902,10 +1907,6 @@ body.has-bottom-nav {
         font-size: 0.78rem;
     }
 
-    .budget-input-row {
-        flex-direction: column;
-        align-items: flex-start;
-    }
 }
 
 /* ============ Stránka Cvičení ============ */

@@ -33,3 +33,11 @@ python3 -m http.server 8000
 - `index.html` – struktura stránky
 - `styles.css` – styly
 - `app.js` – logika (CRUD, vyhledávání, localStorage)
+
+
+## Vývoj
+
+- **Testy:** `npm test` (čistá logika rozpočtu v `budget-logic.js`, spouští se pod Node bez prohlížeče).
+- **Cache-busting:** `npm run stamp` doplní ke skriptům, stylům a importům modulů `?v=<hash>`. Aby se spouštěl automaticky před každým commitem, jednou spusť `git config core.hooksPath .githooks`.
+- **PWA / offline:** `manifest.webmanifest` + `sw.js` (síť má přednost, cache je záloha; Firebase SDK se ukládá pro offline start). Firestore ukládá data do IndexedDB, takže funguje i bez signálu.
+- **Chyby:** `app-guard.js` zobrazí červenou lištu při neošetřené chybě na kterékoli stránce.

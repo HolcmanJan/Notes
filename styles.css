@@ -3981,3 +3981,134 @@ body.bulk-active {
 .budget-modal-backdrop.budget-modal-passthrough .budget-modal-card {
     pointer-events: auto;
 }
+
+/* Modrá tečka u dnů s platbou předplatného */
+.budget-sub-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #2563eb;
+    box-shadow: 0 0 0 1.5px #fff;
+}
+
+.budget-cal-count {
+    right: auto;
+    left: 3px;
+}
+
+/* Stav platby předplatného / převedení plánu */
+.budget-sub-paid {
+    padding: 0.2rem 0.45rem;
+    font-size: 0.72rem;
+}
+
+.budget-sub-paid.is-paid {
+    background: #dcfce7;
+    border-color: #86efac;
+    color: #166534;
+}
+
+.budget-done-tag {
+    font-size: 0.72rem;
+    color: #166534;
+    white-space: nowrap;
+}
+
+.budget-complete-all {
+    margin-top: 0.5rem;
+    width: 100%;
+}
+
+/* Výdaje podle popisu */
+.breakdown-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.15rem 0.5rem;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+}
+
+.breakdown-bar {
+    grid-column: 1 / -1;
+    height: 5px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.breakdown-fill {
+    height: 100%;
+    background: var(--primary);
+}
+
+.copy-prev-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.copy-prev-row .budget-modal-hint {
+    margin: 0;
+}
+
+.export-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+#panel-actual .subs-box + .subs-box,
+#export-box {
+    margin-top: 0.75rem;
+}
+
+/* Palivo – šablony tras */
+.fuel-trips {
+    position: relative;
+    margin-bottom: 0.75rem;
+}
+
+.fuel-trips-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.fuel-trip-row {
+    display: flex;
+    align-items: center;
+}
+
+.fuel-trip-row .fuel-menu-item {
+    flex: 1;
+}
+
+.fuel-trip-del {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+}
+
+.fuel-trip-del:hover {
+    color: #dc2626;
+}
+
+.fuel-trip-form {
+    display: flex;
+    gap: 0.4rem;
+    padding: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.fuel-trip-form .fuel-new-person-input {
+    flex: 1;
+    min-width: 0;
+}

@@ -7,7 +7,12 @@ import {
     signOut,
     onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import {
+    getFirestore,
+    initializeFirestore,
+    persistentLocalCache,
+    persistentMultipleTabManager,
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyDwOHPoR8UFAoobKsAVLGCwT0Os5qUdAX0",
@@ -20,7 +25,18 @@ const firebaseConfig = {
 
 export const fbApp = initializeApp(firebaseConfig);
 export const auth = getAuth(fbApp);
-export const db = getFirestore(fbApp);
+// Offline podpora: Firestore si data ukládá do IndexedDB (čtení i zápisy fungují bez signálu).
+function createDb() {
+    try {
+        return initializeFirestore(fbApp, {
+            localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+        });
+    } catch (err) {
+        console.warn("Offline cache Firestore není dostupná, používám výchozí:", err);
+        return getFirestore(fbApp);
+    }
+}
+export const db = createDb();
 
 const googleProvider = new GoogleAuthProvider();
 

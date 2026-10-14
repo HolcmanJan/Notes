@@ -1,5 +1,5 @@
 // Stránka Cvičení — evidence tréninků, sety, šablony a statistiky.
-import { db } from "./firebase-init.js";
+import { db } from "./firebase-init.js?v=42169443";
 import {
     collection,
     doc,
@@ -11,7 +11,7 @@ import {
     orderBy,
     limit,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js";
+import { initNavigation } from "./navigation.js?v=476675d6";
 
 // ===== Katalog partií =====
 const GROUPS = [

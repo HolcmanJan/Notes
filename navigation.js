@@ -4,7 +4,7 @@ import {
     onAuthStateChanged,
     signInWithGoogle,
     signOutUser,
-} from "./firebase-init.js";
+} from "./firebase-init.js?v=42169443";
 
 const NAV_ITEMS = [
     { key: "home", label: "Domů", icon: "🏠", href: "index.html" },

@@ -1,4 +1,4 @@
-import { db } from "./firebase-init.js";
+import { db } from "./firebase-init.js?v=42169443";
 import {
     collection,
     doc,
@@ -6,7 +6,7 @@ import {
     deleteDoc,
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js";
+import { initNavigation } from "./navigation.js?v=476675d6";
 
 // ----- Stav aplikace -----
 const STORAGE_KEY = "recept.recipes.v1";
@@ -179,6 +179,11 @@ function refreshDetailIfOpen() {
 
 // ----- Vykreslení seznamu -----
 function renderList() {
+    if (!authReady) {
+        recipesEl.innerHTML = '<div class="budget-loading" role="status" aria-label="Načítání"><div class="budget-spinner"></div></div>';
+        emptyStateEl.classList.add("hidden");
+        return;
+    }
     const query = searchEl.value.trim().toLowerCase();
     const category = filterEl.value;
 

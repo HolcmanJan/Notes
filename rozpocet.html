@@ -4,13 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-visual">
     <title>Rozpočet</title>
-    <link rel="stylesheet" href="styles.css?v=20261014d">
+    <link rel="stylesheet" href="styles.css?v=b698fb5d">
     <style>
         .budget-loading { display: flex; align-items: center; justify-content: center; min-height: 260px; }
         .budget-spinner { width: 36px; height: 36px; border: 4px solid #e6e3dc; border-top-color: #c2410c; border-radius: 50%; animation: budget-spin 0.8s linear infinite; }
         .budget-load-error { color: #b91c1c; font-size: 0.9rem; text-align: center; padding: 1rem; }
         @keyframes budget-spin { to { transform: rotate(360deg); } }
     </style>
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#c2410c">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <script src="app-guard.js?v=db886718"></script>
 </head>
 <body>
     <header>
@@ -87,6 +91,7 @@
                         <input type="number" id="subs-amount" class="budget-entry-amt" placeholder="Kč" min="0" step="1" inputmode="numeric">
                         <input type="number" id="subs-day" class="budget-entry-amt" placeholder="Den" min="1" max="31" step="1" inputmode="numeric" aria-label="Den v měsíci">
                         <label class="subs-since-label">Od <input type="date" id="subs-since" class="budget-entry-desc"></label>
+                        <label class="subs-since-label">Do <input type="date" id="subs-until" class="budget-entry-desc" title="Nepovinné"></label>
                         <button type="button" id="subs-add" class="budget-entry-add">Přidat</button>
                     </div>
                 </div>
@@ -102,6 +107,11 @@
 
             <!-- Kalendář skutečnosti -->
             <section class="budget-calendar" id="budget-calendar"><div class="budget-loading" role="status" aria-label="Načítání"><div class="budget-spinner"></div></div></section>
+
+            <details class="subs-box" id="breakdown-box">
+                <summary id="breakdown-summary">Výdaje podle popisu</summary>
+                <div class="subs-body" id="breakdown-list"></div>
+            </details>
         </div>
 
         <!-- Panel: Predikce -->
@@ -134,9 +144,25 @@
                 <button type="button" class="bulk-btn" id="bulk-btn-predict">Hromadné přidání</button>
             </div>
 
+            <div class="copy-prev-row">
+                <button type="button" class="bulk-btn" id="copy-prev-btn">Převzít plán z minulého období</button>
+                <span class="budget-modal-hint" id="copy-prev-hint" role="status"></span>
+            </div>
+
             <!-- Predikční kalendář -->
             <section class="budget-calendar" id="predict-calendar"><div class="budget-loading" role="status" aria-label="Načítání"><div class="budget-spinner"></div></div></section>
         </div>
+
+        <details class="subs-box" id="export-box">
+            <summary>Export a záloha</summary>
+            <div class="subs-body">
+                <div class="export-actions">
+                    <button type="button" class="bulk-btn" id="export-csv">Stáhnout CSV tohoto období</button>
+                    <button type="button" class="bulk-btn" id="export-json">Zálohovat všechna data (JSON)</button>
+                </div>
+                <p class="budget-modal-hint" id="export-hint" role="status"></p>
+            </div>
+        </details>
     </main>
 
     <div class="bulk-bar hidden" id="bulk-bar"></div>
@@ -161,6 +187,6 @@
             }, 15000);
         })();
     </script>
-    <script type="module" src="rozpocet.js?v=20261014d"></script>
+    <script type="module" src="rozpocet.js?v=a145d431"></script>
 </body>
 </html>

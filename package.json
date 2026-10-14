@@ -1,0 +1,8 @@
+{
+  "name": "moje-aplikace",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "stamp": "node tools/stamp-versions.mjs"
+  }
+}

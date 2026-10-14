@@ -1,6 +1,6 @@
 // Stránka s uživatelskými záložkami (URL → dlaždice s náhledem).
 // Metadata stránek se získávají přes vlastní Cloudflare Worker.
-import { db } from "./firebase-init.js";
+import { db } from "./firebase-init.js?v=42169443";
 import {
     collection,
     doc,
@@ -10,7 +10,7 @@ import {
     deleteDoc,
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js";
+import { initNavigation } from "./navigation.js?v=476675d6";
 
 const STORAGE_KEY = "recept.bookmarks.v1";
 const PAGE_SIZE = 12;

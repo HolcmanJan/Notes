@@ -298,3 +298,6 @@ body.budget-page header h1 { color: var(--bx-ink); }
 .bx-sticky-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--bx-brand); border-radius: 3px; min-width: 3px; }
 .bx-sticky-bar i.plan { background: #f0a27c; }
 .bx-sticky-nums { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.74rem; font-weight: 700; color: var(--bx-muted); }
+
+.bx-toast { position: fixed; left: 1rem; right: 1rem; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 1300; max-width: 520px; margin: 0 auto; background: #2b2622; color: #fff; border-radius: 14px; padding: 0.75rem 1rem; font-size: 0.86rem; font-weight: 600; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity 0.2s, transform 0.2s; }
+.bx-toast.show { opacity: 1; transform: none; }

@@ -1,5 +1,5 @@
 // Rozpočet – sledování měsíčního rozpočtu (výchozí období 14. – 13., s možností vlastního začátku)
-import { db } from "./firebase-init.js?v=42169443";
+import { db } from "./firebase-init.js?v=7f863fdb";
 import {
     doc,
     setDoc,
@@ -8,7 +8,7 @@ import {
     collection,
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js?v=476675d6";
+import { initNavigation } from "./navigation.js?v=6200029e";
 import * as logic from "./budget-logic.js?v=00b71e40";
 const { fmtDate } = logic;
 
@@ -266,9 +266,34 @@ function migrateExpenses(expenses) {
     return logic.migrateEntries(expenses, genId);
 }
 
+// Lokální cache dat přihlášeného uživatele: stránka se zobrazí hned, bez čekání na Firestore.
+const CACHE_PREFIX = "recept.budget.cache.";
+const LAST_UID_KEY = "recept.budget.lastUid";
+
+function loadCache(uid) {
+    try { return JSON.parse(localStorage.getItem(CACHE_PREFIX + uid) || "{}") || {}; } catch { return {}; }
+}
+
+function saveCachePeriod(uid, key, data) {
+    try {
+        const c = loadCache(uid);
+        c[key] = data;
+        localStorage.setItem(CACHE_PREFIX + uid, JSON.stringify(c));
+    } catch { /* plné úložiště – cache je jen urychlení */ }
+}
+
+function normalizeBudget(raw) {
+    const b = { ...defaultBudget(), ...raw };
+    b.expenses = migrateExpenses(b.expenses);
+    return b;
+}
+
 async function persistBudgetData() {
+    if (!budgetData) return;
     if (currentUser) {
-        const ref = doc(db, "users", currentUser.uid, "budget", periodKey());
+        const key = periodKey();
+        saveCachePeriod(currentUser.uid, key, budgetData);
+        const ref = doc(db, "users", currentUser.uid, "budget", key);
         await setDoc(ref, budgetData);
     } else {
         const allData = loadLocal();
@@ -281,6 +306,7 @@ let saveTimeout = null;
 function debouncedSave() {
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(async () => {
+        saveTimeout = null;
         try {
             await persistBudgetData();
         } catch (err) {
@@ -335,7 +361,23 @@ function expectedRemainingToday() {
 }
 
 // ----- Stav načítání / predikce -----
-function loadPeriodData() {
+let loadSeq = 0;
+
+function showToast(msg) {
+    let t = document.getElementById("bx-toast");
+    if (!t) {
+        t = h("div", { class: "bx-toast", id: "bx-toast", role: "status" });
+        document.body.append(t);
+    }
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(showToast.timer);
+    showToast.timer = setTimeout(() => t.classList.remove("show"), 6000);
+}
+
+function loadPeriodData(attempt = 0) {
+    const seq = ++loadSeq;
+
     // Zruš předchozí Firestore listener
     if (unsubscribeBudget) {
         unsubscribeBudget();
@@ -346,10 +388,22 @@ function loadPeriodData() {
     loadPredictForPeriod();
 
     if (currentUser) {
-        showCalendarLoading();
-        // Načti predikce z Firestore
-        const predRef = doc(db, "users", currentUser.uid, "budget", predictKey());
-        getDoc(predRef).then((snap) => {
+        const uid = currentUser.uid;
+        const key = periodKey();
+
+        // 1) Okamžitě z lokální cache (pokud existuje), jinak kolečko
+        const cached = loadCache(uid)[key];
+        if (cached) {
+            budgetData = normalizeBudget(cached);
+            render();
+        } else if (attempt === 0) {
+            budgetData = null;
+            showCalendarLoading();
+        }
+
+        // 2) Predikce z Firestore
+        getDoc(doc(db, "users", uid, "budget", predictKey())).then((snap) => {
+            if (seq !== loadSeq) return;
             if (snap.exists() && snap.data().predictions) {
                 predictData = migrateExpenses(snap.data().predictions);
                 savePredictLocal({ ...loadPredictLocal(), [predictKey()]: predictData });
@@ -357,28 +411,29 @@ function loadPeriodData() {
             }
         }).catch(() => {});
 
-        const ref = doc(db, "users", currentUser.uid, "budget", periodKey());
+        // 3) Živý odběr období; při mlčení spojení ho po 5 s znovu navážeme (max. 3×)
+        let gotFirst = false;
         unsubscribeBudget = onSnapshot(
-            ref,
+            doc(db, "users", uid, "budget", key),
             (snapshot) => {
-                if (snapshot.exists()) {
-                    budgetData = { ...defaultBudget(), ...snapshot.data() };
-                    budgetData.expenses = migrateExpenses(budgetData.expenses);
-                } else {
-                    budgetData = defaultBudget();
-                }
+                if (seq !== loadSeq) return;
+                gotFirst = true;
+                budgetData = snapshot.exists() ? normalizeBudget(snapshot.data()) : defaultBudget();
+                saveCachePeriod(uid, key, budgetData);
                 render();
             },
             (err) => {
+                if (seq !== loadSeq) return;
+                gotFirst = true;
                 console.error("Firestore chyba:", err);
-                budgetData = defaultBudget();
+                if (!budgetData) budgetData = defaultBudget();
                 render();
-                alert(
-                    "Nepodařilo se načíst rozpočet z cloudu. Zkontroluj Firestore pravidla.\n\n" +
-                    err.message
-                );
+                showToast("Nepodařilo se načíst data z cloudu: " + err.message);
             }
         );
+        setTimeout(() => {
+            if (seq === loadSeq && !gotFirst && attempt < 3) loadPeriodData(attempt + 1);
+        }, 5000);
     } else {
         const allData = loadLocal();
         budgetData = getBudgetForPeriod(allData);
@@ -423,7 +478,24 @@ async function persistPredictData() {
 let predictSaveTimeout = null;
 function debouncedPredictSave() {
     clearTimeout(predictSaveTimeout);
-    predictSaveTimeout = setTimeout(() => persistPredictData(), 400);
+    predictSaveTimeout = setTimeout(() => {
+        predictSaveTimeout = null;
+        persistPredictData();
+    }, 400);
+}
+
+// Dokončí odložené uložení dřív, než se změní období (jinak by se zapsalo do špatného dokumentu).
+function flushPendingSaves() {
+    if (saveTimeout) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+        persistBudgetData().catch((err) => console.error(err));
+    }
+    if (predictSaveTimeout) {
+        clearTimeout(predictSaveTimeout);
+        predictSaveTimeout = null;
+        persistPredictData();
+    }
 }
 
 function dayPredicted(dateStr) {
@@ -449,15 +521,18 @@ function saveCustomStartsLocal(starts) {
 }
 
 async function loadCustomStartsFirestore() {
-    if (!currentUser) return;
+    if (!currentUser) return false;
     try {
         const ref = doc(db, "users", currentUser.uid, "budget", "_meta");
         const snap = await getDoc(ref);
         if (snap.exists() && Array.isArray(snap.data().customStarts)) {
+            const changed = JSON.stringify(snap.data().customStarts) !== JSON.stringify(customStarts);
             customStarts = snap.data().customStarts;
             saveCustomStartsLocal(customStarts);
+            return changed;
         }
     } catch (err) { console.error("Failed to load custom starts:", err); }
+    return false;
 }
 
 async function persistCustomStarts() {
@@ -734,6 +809,7 @@ function updateNavBtns() {
 
 function goToPeriod(offset) {
     if (!periodExists(offset)) return;
+    flushPendingSaves();
     periodOffset = offset;
     sheet = null;
     sheetBack = null;
@@ -747,6 +823,8 @@ function goToPeriod(offset) {
 }
 
 function showCalendarLoading() {
+    heroEl.classList.add("hidden");
+    stickyBar.classList.remove("show");
     for (const el of [calendarEl, predictCalendarEl]) {
         setChildren(el, h("div", { class: "budget-loading", role: "status", "aria-label": "Načítání" }, h("div", { class: "budget-spinner" })));
     }
@@ -1811,12 +1889,31 @@ computePeriod(0);
 updateNavBtns();
 renderPeriod();
 
-initNavigation("rozpocet", async (user) => {
+// Optimistické zobrazení: poslední přihlášený uživatel má data v cache → stránka se ukáže hned
+try {
+    const lastUid = localStorage.getItem(LAST_UID_KEY);
+    const cached = lastUid ? loadCache(lastUid)[periodKey()] : null;
+    if (cached) {
+        budgetData = normalizeBudget(cached);
+        loadPredictForPeriod();
+        render();
+    }
+} catch { /* ignore */ }
+
+initNavigation("rozpocet", (user) => {
     currentUser = user;
+    try {
+        if (user) localStorage.setItem(LAST_UID_KEY, user.uid);
+        else localStorage.removeItem(LAST_UID_KEY);
+    } catch { /* ignore */ }
     if (user) {
-        await withTimeout(loadCustomStartsFirestore(), 8000);
-        computePeriod(periodOffset);
-        updateNavBtns();
+        loadCustomStartsFirestore().then((changed) => {
+            if (!changed) return;
+            computePeriod(periodOffset);
+            updateNavBtns();
+            renderPeriod();
+            loadPeriodData();
+        });
         Promise.all([loadSubsFirestore(), loadTemplatesFirestore()]).then(() => {
             if (budgetData) render();
         });

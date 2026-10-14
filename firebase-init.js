@@ -30,6 +30,9 @@ function createDb() {
     try {
         return initializeFirestore(fbApp, {
             localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+            // Některé mobilní prohlížeče/proxy (např. úsporný režim) blokují streamované spojení WebChannel,
+            // první dotaz pak visí desítky sekund. Long polling je spolehlivý i v takové síti.
+            experimentalForceLongPolling: true,
         });
     } catch (err) {
         console.warn("Offline cache Firestore není dostupná, používám výchozí:", err);

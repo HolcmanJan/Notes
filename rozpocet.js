@@ -15,7 +15,7 @@ const { fmtDate } = logic;
 const REQUIRED_IDS = [
     "hero", "period-label", "period-menu", "newmonth-confirm", "quick-add-btn", "tpl-btn-actual", "tpl-btn-predict",
     "bulk-btn-actual", "bulk-btn-predict", "subs-card", "breakdown-card", "export-csv", "copy-prev-btn",
-    "view-bulk", "view-subs", "sheet", "sheet-backdrop", "predict-calendar", "budget-calendar",
+    "view-bulk", "view-subs", "sticky-bar", "sheet", "sheet-backdrop", "predict-calendar", "budget-calendar",
 ];
 if (REQUIRED_IDS.some((id) => !document.getElementById(id))) {
     try {
@@ -175,6 +175,10 @@ const viewSubsEl = $("view-subs");
 const sheetBackdropEl = $("sheet-backdrop");
 const sheetEl = $("sheet");
 const quickAddBtn = $("quick-add-btn");
+const stickyBar = $("sticky-bar");
+const stickyPrev = $("sticky-prev");
+const stickyNext = $("sticky-next");
+const stickyMid = $("sticky-mid");
 
 // ----- Období -----
 function buildBoundaries() {
@@ -724,8 +728,8 @@ function periodExists(offset) {
 }
 
 function updateNavBtns() {
-    prevBtn.disabled = !periodExists(periodOffset - 1);
-    nextBtn.disabled = !periodExists(periodOffset + 1);
+    prevBtn.disabled = stickyPrev.disabled = !periodExists(periodOffset - 1);
+    nextBtn.disabled = stickyNext.disabled = !periodExists(periodOffset + 1);
 }
 
 function goToPeriod(offset) {
@@ -846,6 +850,7 @@ function render() {
     renderSheet();
     renderBulk();
     renderSubsView();
+    renderSticky();
     document.body.style.overflow = sheet || bulk || subsOpen ? "hidden" : "";
     if (editingBudget) {
         const inp = heroEl.querySelector('[data-k="budget"]');
@@ -1064,6 +1069,53 @@ function renderCalendars() {
     const avg = periodDays.length ? (budgetData.amount || 0) / periodDays.length : 0;
     predictAvgEl.textContent = avg > 0 ? "Průměr " + fmtMoney(Math.round(avg)) + " / den" : "";
 }
+
+// ----- Připnutá lišta -----
+function renderSticky() {
+    const amount = budgetData.amount || 0;
+    let left;
+    let right;
+    let pct;
+    let planPct = null;
+    if (activeTab === "actual") {
+        const spent = totalSpent();
+        left = "Utraceno " + fmtMoney(spent);
+        right = "Zůstatek " + fmtMoney(amount - spent);
+        pct = amount > 0 ? Math.min(100, (spent / amount) * 100) : 0;
+    } else {
+        const planned = totalPredicted();
+        const actual = totalSpent();
+        const denom = Math.max(amount, planned, actual, 1);
+        left = "Plánováno " + fmtMoney(planned);
+        right = "Volné " + fmtMoney(amount - planned);
+        pct = (actual / denom) * 100;
+        planPct = (planned / denom) * 100;
+    }
+    setChildren(stickyMid,
+        h("span", { class: "bx-sticky-range", text: fmtRange() }),
+        h("span", { class: "bx-sticky-bar" },
+            planPct != null ? h("i", { class: "plan", style: "width:" + planPct + "%" }) : null,
+            h("i", { style: "width:" + pct + "%" })),
+        h("span", { class: "bx-sticky-nums" }, h("span", { text: left }), h("span", { text: right })));
+    updateStickyVisibility();
+}
+
+function updateStickyVisibility() {
+    const show = !!budgetData && heroEl.getBoundingClientRect().bottom < 8 && !sheet && !bulk && !subsOpen;
+    stickyBar.classList.toggle("show", show);
+    stickyBar.setAttribute("aria-hidden", String(!show));
+    for (const el of [stickyPrev, stickyNext, stickyMid]) el.tabIndex = show ? 0 : -1;
+}
+
+let stickyTick = false;
+window.addEventListener("scroll", () => {
+    if (stickyTick) return;
+    stickyTick = true;
+    requestAnimationFrame(() => {
+        stickyTick = false;
+        updateStickyVisibility();
+    });
+}, { passive: true });
 
 // ----- Karty pod kalendářem -----
 function activeSubs() {
@@ -1706,6 +1758,9 @@ function switchTab(tab) {
 
 prevBtn.addEventListener("click", () => goToPeriod(periodOffset - 1));
 nextBtn.addEventListener("click", () => goToPeriod(periodOffset + 1));
+stickyPrev.addEventListener("click", () => goToPeriod(periodOffset - 1));
+stickyNext.addEventListener("click", () => goToPeriod(periodOffset + 1));
+stickyMid.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 periodLabelBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     periodMenuOpen = !periodMenuOpen;
@@ -1737,6 +1792,8 @@ document.addEventListener("keydown", (e) => {
 
 prevBtn.append(icon("left", 22));
 nextBtn.append(icon("right", 22));
+stickyPrev.append(icon("left", 22));
+stickyNext.append(icon("right", 22));
 quickAddBtn.append(icon("plus", 18), "Výdaj dnes");
 for (const kind of ["actual", "predict"]) {
     $("tpl-btn-" + kind).append(icon("layers", 18), "Šablony");

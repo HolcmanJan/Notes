@@ -4,168 +4,125 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-visual">
     <title>Rozpočet</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap">
     <link rel="stylesheet" href="styles.css?v=b698fb5d">
+    <link rel="stylesheet" href="rozpocet.css?v=4dcdffa6">
     <style>
         .budget-loading { display: flex; align-items: center; justify-content: center; min-height: 260px; }
-        .budget-spinner { width: 36px; height: 36px; border: 4px solid #e6e3dc; border-top-color: #c2410c; border-radius: 50%; animation: budget-spin 0.8s linear infinite; }
+        .budget-spinner { width: 36px; height: 36px; border: 4px solid #e6e3dc; border-top-color: #a63a12; border-radius: 50%; animation: budget-spin 0.8s linear infinite; }
         .budget-load-error { color: #b91c1c; font-size: 0.9rem; text-align: center; padding: 1rem; }
         @keyframes budget-spin { to { transform: rotate(360deg); } }
     </style>
     <link rel="manifest" href="manifest.webmanifest">
-    <meta name="theme-color" content="#c2410c">
+    <meta name="theme-color" content="#a63a12">
     <link rel="apple-touch-icon" href="icon-192.png">
     <script src="app-guard.js?v=db886718"></script>
 </head>
-<body>
+<body class="budget-page">
     <header>
         <div class="container header-inner">
             <h1>Rozpočet</h1>
         </div>
     </header>
 
-    <main class="container">
-        <!-- Nastavení rozpočtu -->
-        <section class="budget-header">
-            <div class="budget-period-nav">
-                <button type="button" id="period-prev" class="budget-nav-btn" aria-label="Předchozí období">‹</button>
-                <div class="budget-period" id="budget-period"></div>
-                <button type="button" id="period-next" class="budget-nav-btn" aria-label="Následující období">›</button>
-            </div>
-            <button type="button" id="period-today" class="budget-today-btn hidden">Aktuální období</button>
-            <button type="button" id="new-month-btn" class="budget-newmonth-btn hidden">Nový měsíc</button>
-            <div class="budget-confirm hidden" id="newmonth-confirm">
-                <span>Ukončit aktuální období a začít nové od dneška? Výdaje od dneška se přesunou do nového období.</span>
-                <div class="budget-confirm-actions">
-                    <button type="button" id="newmonth-yes" class="budget-entry-add">Ano, začít</button>
-                    <button type="button" id="newmonth-no" class="budget-entry-cancel">Zrušit</button>
-                </div>
-            </div>
-            <div class="budget-input-row">
-                <label for="budget-amount">Rozpočet na období:</label>
-                <div class="budget-input-wrap">
-                    <input type="number" id="budget-amount" min="0" step="100" placeholder="0">
-                    <span class="budget-currency">Kč</span>
-                </div>
+    <main class="container bx" id="bx-main">
+        <!-- Přepínač období -->
+        <section class="bx-period">
+            <button type="button" id="period-prev" class="bx-icon-btn" aria-label="Předchozí období"></button>
+            <button type="button" id="period-label" class="bx-period-label" aria-haspopup="true" aria-expanded="false">
+                <span class="bx-period-range" id="budget-period"></span>
+                <span class="bx-period-sub" id="period-sub"></span>
+            </button>
+            <button type="button" id="period-next" class="bx-icon-btn" aria-label="Následující období"></button>
+            <div class="bx-menu hidden" id="period-menu" role="menu">
+                <button type="button" id="period-today" role="menuitem">Aktuální období</button>
+                <button type="button" id="new-month-btn" role="menuitem">Nový měsíc</button>
+                <p id="period-menu-hint" class="bx-menu-hint hidden">Nový měsíc jde začít od druhého dne období.</p>
             </div>
         </section>
 
-        <!-- Záložky -->
-        <div class="budget-tabs" role="tablist">
-            <button type="button" class="budget-tab active" id="tab-actual" role="tab" aria-selected="true" aria-controls="panel-actual">Přehled</button>
-            <button type="button" class="budget-tab" id="tab-predict" role="tab" aria-selected="false" aria-controls="panel-predict">Predikce</button>
+        <div class="bx-confirm hidden" id="newmonth-confirm" role="alertdialog">
+            <p>Ukončit aktuální období a začít nové od dneška? Výdaje od dneška se přesunou do nového období.</p>
+            <div class="bx-confirm-actions">
+                <button type="button" id="newmonth-yes" class="bx-btn bx-btn-primary">Ano, začít</button>
+                <button type="button" id="newmonth-no" class="bx-btn">Zrušit</button>
+            </div>
+        </div>
+
+        <!-- Hlavní karta -->
+        <section class="bx-hero hidden" id="hero"></section>
+
+        <!-- Přepínač Přehled / Predikce -->
+        <div class="bx-seg" role="tablist">
+            <button type="button" class="bx-seg-btn active" id="tab-actual" role="tab" aria-selected="true" aria-controls="panel-actual">Přehled</button>
+            <button type="button" class="bx-seg-btn" id="tab-predict" role="tab" aria-selected="false" aria-controls="panel-predict">Predikce</button>
         </div>
 
         <!-- Panel: Přehled -->
         <div id="panel-actual" role="tabpanel">
-            <!-- Souhrn -->
-            <section class="budget-summary" id="budget-summary">
-                <div class="budget-stat">
-                    <span class="budget-stat-label">Rozpočet</span>
-                    <span class="budget-stat-value" id="stat-total">0 Kč</span>
+            <div class="bx-actions bx-actions-3">
+                <button type="button" class="bx-btn bx-btn-primary" id="quick-add-btn"></button>
+                <button type="button" class="bx-btn" id="tpl-btn-actual"></button>
+                <button type="button" class="bx-btn" id="bulk-btn-actual"></button>
+            </div>
+
+            <section class="bx-card">
+                <div class="bx-card-head">
+                    <h2>Kalendář</h2>
+                    <span class="bx-muted">Klepni na den pro zápis</span>
                 </div>
-                <div class="budget-stat">
-                    <span class="budget-stat-label">Utraceno</span>
-                    <span class="budget-stat-value" id="stat-spent">0 Kč</span>
-                </div>
-                <div class="budget-stat">
-                    <span class="budget-stat-label">Zůstatek</span>
-                    <span class="budget-stat-value" id="stat-remaining">
-                        <span id="stat-remaining-value">0 Kč</span>
-                        <span id="stat-remaining-arrow" class="budget-arrow hidden"></span>
-                    </span>
-                </div>
-                <div class="budget-stat">
-                    <span class="budget-stat-label">Denně</span>
-                    <span class="budget-stat-value" id="stat-daily">0 Kč</span>
+                <div id="budget-calendar"><div class="budget-loading" role="status" aria-label="Načítání"><div class="budget-spinner"></div></div></div>
+                <div class="bx-legend">
+                    <span><i class="bx-dot-ok"></i>Do limitu</span>
+                    <span><i class="bx-dot-warn"></i>Do 150 %</span>
+                    <span><i class="bx-dot-over"></i>Nad 150 %</span>
+                    <span><i class="bx-dot-sub"></i>Předplatná</span>
                 </div>
             </section>
 
-            <!-- Předplatná -->
-            <details class="subs-box" id="subs-box">
-                <summary id="subs-summary">Předplatná</summary>
-                <div class="subs-body">
-                    <p class="budget-modal-hint">Opakující se měsíční platby. Automaticky se propisují do výdajů (od data platby) i do predikce každého měsíce.</p>
-                    <div id="subs-list"></div>
-                    <div class="subs-form">
-                        <input type="text" id="subs-name" class="budget-entry-desc" placeholder="Název (např. Netflix)" maxlength="40">
-                        <input type="number" id="subs-amount" class="budget-entry-amt" placeholder="Kč" min="0" step="1" inputmode="numeric">
-                        <input type="number" id="subs-day" class="budget-entry-amt" placeholder="Den" min="1" max="31" step="1" inputmode="numeric" aria-label="Den v měsíci">
-                        <label class="subs-since-label">Od <input type="date" id="subs-since" class="budget-entry-desc"></label>
-                        <label class="subs-since-label">Do <input type="date" id="subs-until" class="budget-entry-desc" title="Nepovinné"></label>
-                        <button type="button" id="subs-add" class="budget-entry-add">Přidat</button>
-                    </div>
+            <section class="bx-card" id="subs-card"></section>
+            <section class="bx-card" id="breakdown-card"></section>
+
+            <section class="bx-card" id="export-card">
+                <div class="bx-card-head"><h2>Export a záloha</h2></div>
+                <div class="bx-actions bx-actions-2">
+                    <button type="button" class="bx-btn" id="export-csv"></button>
+                    <button type="button" class="bx-btn" id="export-json"></button>
                 </div>
-            </details>
-
-            <div class="budget-toolbar">
-                <div class="tpl-wrap">
-                    <button type="button" class="bulk-btn" id="tpl-btn-actual">Šablony ▾</button>
-                    <div class="tpl-menu hidden" id="tpl-menu-actual"></div>
-                </div>
-                <button type="button" class="bulk-btn" id="bulk-btn-actual">Hromadné přidání</button>
-            </div>
-
-            <!-- Kalendář skutečnosti -->
-            <section class="budget-calendar" id="budget-calendar"><div class="budget-loading" role="status" aria-label="Načítání"><div class="budget-spinner"></div></div></section>
-
-            <details class="subs-box" id="breakdown-box">
-                <summary id="breakdown-summary">Výdaje podle popisu</summary>
-                <div class="subs-body" id="breakdown-list"></div>
-            </details>
+                <p class="bx-hint" id="export-hint" role="status"></p>
+            </section>
         </div>
 
         <!-- Panel: Predikce -->
         <div id="panel-predict" role="tabpanel" class="hidden">
-            <!-- Souhrn predikce -->
-            <section class="budget-summary" id="predict-summary">
-                <div class="budget-stat">
-                    <span class="budget-stat-label">Plánováno</span>
-                    <span class="budget-stat-value" id="pred-stat-planned">0 Kč</span>
+            <button type="button" class="bx-btn bx-btn-wide" id="copy-prev-btn"></button>
+            <p class="bx-hint" id="copy-prev-hint" role="status"></p>
+            <div class="bx-actions bx-actions-2">
+                <button type="button" class="bx-btn" id="tpl-btn-predict"></button>
+                <button type="button" class="bx-btn" id="bulk-btn-predict"></button>
+            </div>
+
+            <section class="bx-card">
+                <div class="bx-card-head">
+                    <h2>Plán výdajů</h2>
+                    <span class="bx-muted" id="predict-avg"></span>
                 </div>
-                <div class="budget-stat">
-                    <span class="budget-stat-label">Skutečné</span>
-                    <span class="budget-stat-value" id="pred-stat-actual">0 Kč</span>
-                </div>
-                <div class="budget-stat">
-                    <span class="budget-stat-label">Odchylka</span>
-                    <span class="budget-stat-value" id="pred-stat-diff">0 Kč</span>
-                </div>
-                <div class="budget-stat">
-                    <span class="budget-stat-label">Volné</span>
-                    <span class="budget-stat-value" id="pred-stat-unplanned">0 Kč</span>
-                </div>
+                <div id="predict-calendar"><div class="budget-loading" role="status" aria-label="Načítání"><div class="budget-spinner"></div></div></div>
+                <p class="bx-footnote">Budoucí dny: plán proti průměru. Minulé dny: skutečnost proti plánu. Předplatná se započítávají vždy.</p>
             </section>
-
-            <div class="budget-toolbar">
-                <div class="tpl-wrap">
-                    <button type="button" class="bulk-btn" id="tpl-btn-predict">Šablony ▾</button>
-                    <div class="tpl-menu hidden" id="tpl-menu-predict"></div>
-                </div>
-                <button type="button" class="bulk-btn" id="bulk-btn-predict">Hromadné přidání</button>
-            </div>
-
-            <div class="copy-prev-row">
-                <button type="button" class="bulk-btn" id="copy-prev-btn">Převzít plán z minulého období</button>
-                <span class="budget-modal-hint" id="copy-prev-hint" role="status"></span>
-            </div>
-
-            <!-- Predikční kalendář -->
-            <section class="budget-calendar" id="predict-calendar"><div class="budget-loading" role="status" aria-label="Načítání"><div class="budget-spinner"></div></div></section>
         </div>
-
-        <details class="subs-box" id="export-box">
-            <summary>Export a záloha</summary>
-            <div class="subs-body">
-                <div class="export-actions">
-                    <button type="button" class="bulk-btn" id="export-csv">Stáhnout CSV tohoto období</button>
-                    <button type="button" class="bulk-btn" id="export-json">Zálohovat všechna data (JSON)</button>
-                </div>
-                <p class="budget-modal-hint" id="export-hint" role="status"></p>
-            </div>
-        </details>
     </main>
 
-    <div class="bulk-bar hidden" id="bulk-bar"></div>
+    <!-- Celoobrazovkové pohledy -->
+    <div class="bx-view hidden" id="view-bulk"></div>
+    <div class="bx-view hidden" id="view-subs"></div>
+
+    <!-- Spodní panel -->
+    <div class="bx-backdrop hidden" id="sheet-backdrop">
+        <div class="bx-sheet" id="sheet" role="dialog" aria-modal="true"></div>
+    </div>
 
     <script>
         (function () {
@@ -187,6 +144,6 @@
             }, 15000);
         })();
     </script>
-    <script type="module" src="rozpocet.js?v=a145d431"></script>
+    <script type="module" src="rozpocet.js?v=504534d7"></script>
 </body>
 </html>

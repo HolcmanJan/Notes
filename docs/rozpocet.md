@@ -5,53 +5,45 @@ Stránka `rozpocet.html` slouží ke sledování výdajů v měsíčním rozpoč
 ## 1. Uživatelská příručka
 
 ### 1.1 Rozpočtové období
-- Výchozí období trvá od **14. do 13.** následujícího měsíce. Šipky `‹` `›` přepínají mezi obdobími, tlačítko **Aktuální období** vrací na dnešek.
-- Do pole **Rozpočet na období** zadáš částku, kterou chceš v období utratit. Ukládá se automaticky.
-- **Nový měsíc** (viditelné jen v aktuálním období, a ne první den období) ukončí aktuální období k dnešku a začne nové od dnešního dne. Záznamy od dneška se přesunou do nového období. Před provedením se zobrazí potvrzovací pruh. Vlastní začátky se ukládají a ovlivňují následující období (přirozené 14. se nahradí).
+- Výchozí období trvá od **14. do 13.** následujícího měsíce. Šipky `‹` `›` přepínají období, pod datem je stav („Aktuální období · den 7 z 31“).
+- Klepnutím na datum se otevře menu: **Aktuální období** (když prohlížíš jiné období) a **Nový měsíc** (jen v aktuálním období a ne první den). Nový měsíc ukončí období k dnešku, nové začne dnes a záznamy od dneška se do něj přesunou (potvrzovací pruh pod přepínačem). Nové období je kvůli tomu delší (přirozené 14. se nahradí).
 
-### 1.2 Přehled čísel
-Čtyři karty nad kalendářem:
+### 1.2 Hlavní karta
+**Přehled:** hlavní číslo je **zůstatek**, pod ním pruh čerpání se značkou tempa (svislá čárka = kolik by sis měl/a do dneška utratit při rovnoměrném tempu). Štítek **Pod tempem / Nad tempem** nahrazuje dřívější šipku. Dole: **Dnes můžeš** (denní limit), **Utraceno** a **Rozpočet** – klepnutím na něj ho upravíš přímo v kartě.
+**Predikce:** tmavá karta s plánovanou částkou, štítkem **Volné / Přes plán**, pruhem plán vs. skutečnost a trojicí Skutečné / Odchylka / Volné.
 
-| Karta | Význam |
-|---|---|
-| Rozpočet | Zadaný rozpočet období |
-| Utraceno | Součet výdajů + zaúčtovaných předplatných |
-| Zůstatek | Rozpočet − utraceno; šipka ▲/▼ ukazuje, zda jsi nad/pod průměrným tempem |
-| Denně | Kolik můžeš utratit dnes (viz vzorce níže) |
+### 1.3 Akce a kalendář
+- **Výdaj dnes** (jen v aktuálním období) otevře zápis pro dnešek; **Šablony** a **Hromadně** viz níže.
+- V kalendáři je vidět částka dne, dnešek má rámeček, **modrá tečka** značí platbu předplatného. Barvy: zelená = do limitu, žlutá = do 150 %, červená = nad 150 % (legenda je pod kalendářem).
 
-V záložce Predikce jsou karty Plánováno, Skutečné, Odchylka a Volné.
+### 1.4 Spodní panel dne
+Klepnutí na den otevře spodní panel:
+- **pruh sedmi dnů** týdne – klepnutím přeskočíš na jiný den (dny mimo období jsou zašedlé);
+- **Denní limit** a **Ještě můžeš** (u Predikce Průměr / den a Plán dne);
+- karta **předplatného** dne s přepínačem **Zaplaceno** (automaticky: strhne se v den platby; ruční přepnutí se označí „Nastaveno ručně“);
+- formulář **Částka + Popis**, rychlé **šablony** (klepnutí přidá rovnou) a **+ Nová**;
+- **Položky dne** se součtem; ✎ upraví, 🗑 smaže. V Predikci má položka **→ výdaj** (převede plán na skutečný výdaj) a dole je **Převést vše na výdaje**.
+Panel zavřeš tlačítkem ✕, klepnutím mimo nebo klávesou Esc.
 
-### 1.3 Kalendář a zápis výdajů
-- Klik na den otevře popup: nahoře formulář (částka, popis, **Přidat**), pod ním seznam položek dne. Položku lze upravit (✎) nebo smazat (✕).
-- Při otevřeném popupu zůstávají ostatní dny klikatelné – kliknutím přeskočíš na další den. Klik mimo popup ho zavře.
-- Barva dne: šedá = bez výdaje, zelená = do denního budgetu, oranžová = do 150 %, červená = nad 150 %.
-- Odznak `N×` v levém horním rohu = počet položek ve dni. **Modrá tečka** v pravém horním rohu = ve dni je platba předplatného.
+### 1.5 Hromadné přidání
+Celoobrazovkový průvodce: **1 Částka a popis** → **2 Vyber dny**. Ve druhém kroku je nahoře souhrn („Snídaně · 45 Kč“, tlačítko **Upravit**), klepáním v kalendáři vybereš dny (zmodrají s fajfkou) a spodní lišta ukazuje **počet dnů a součet**. **Přidat** je neaktivní, dokud není vybrán aspoň jeden den. Tlačítko Zpět (nebo **Zrušit**) průvodce zavře.
 
-### 1.4 Hromadné přidání
-Tlačítko **Hromadné přidání** nad kalendářem: zadáš částku a popis → **Dál – vybrat dny** → klikáním v kalendáři vybereš dny (zmodrají) → **Přidat**. Tlačítko je neaktivní, dokud není vybraný alespoň jeden den. Lišta dole ukazuje počet dnů a celkovou částku; **Upravit** vrací k formuláři, **Zrušit** vše ruší.
+### 1.6 Šablony
+Tlačítko **Šablony** otevře panel se seznamem šablon (název + částka). Klepnutí na šablonu spustí hromadné přidání rovnou na kroku výběru dnů. U šablony lze ✎ upravit, 🗑 smazat, **Nová šablona** vytvoří další. Šablony jsou společné pro Přehled i Predikci.
 
-### 1.5 Šablony
-**Šablony ▾** → seznam uložených předvyplněných výdajů (název + částka). Klik na šablonu spustí hromadné přidání s předvyplněnými údaji. U šablony lze ✎ upravit a ✕ smazat; **＋ Nová šablona** vytvoří novou. Šablony jsou společné pro Přehled i Predikci.
+### 1.7 Předplatná
+Na přehledu je karta s počtem plateb, měsíčním součtem a **Nejbližšími platbami**. Tlačítko **Spravovat** otevře samostatnou obrazovku:
+- modrá karta **Měsíčně celkem** (počet aktivních a podíl na rozpočtu),
+- seznam seřazený podle dne v měsíci s další platbou,
+- formulář **Nové předplatné / Upravit předplatné**: název, částka, den v měsíci, **Od** a nepovinné **Do**.
+Platba se objeví ve svůj den v každém období v rozmezí Od–Do (u kratších měsíců poslední den). Do výdajů se počítá od dne platby (lze přepsat přepínačem Zaplaceno), do predikce vždy. **Smazání** je až v úpravě předplatného a vyžaduje potvrzení, protože odstraní i historii; pro ukončení se zachováním historie nastav datum **Do**.
 
-### 1.6 Předplatná
-Rozbalovací pole **Předplatná** (pod kartami) obsahuje seznam řazený podle dne v měsíci a formulář: název, částka, den v měsíci, **Od** (výchozí začátek aktuálního období) a nepovinné **Do**.
-- Platba se automaticky objeví ve svůj den v každém období v rozmezí Od–Do. U měsíců bez daného dne (např. 31.) se strhne poslední den měsíce.
-- **Výdaje:** platba se počítá do „Utraceno“ od svého dne. V popupu dne má tlačítko **✓ zaplaceno / nezaplaceno**, kterým lze automatický stav ručně přepsat (např. platba se nestrhla).
-- **Predikce:** platba se počítá vždy, i u budoucích dnů.
-- Smazání předplatného ho odstraní i z historie; pro ukončení se zachováním historie nastav datum **Do**.
+### 1.8 Predikce
+Záložka **Predikce** má vlastní kalendář plánu (stejný panel dne, šablony a hromadné přidání). **Převzít plán z minulého období** zkopíruje plán na stejná čísla dnů (bez duplicit) a prázdný rozpočet doplní z minulého období.
 
-### 1.7 Predikce
-Záložka **Predikce** má vlastní kalendář plánovaných výdajů (stejný popup, hromadné přidání a šablony).
-- Barvy: minulé dny porovnávají skutečnost s plánem (bez plánu s průměrným denním budgetem), budoucí dny plán s průměrným denním budgetem.
-- **→ výdaj** u plánované položky ji převede na skutečný výdaj (plán zůstane, položka se označí „✓ převedeno“); **Převést vše na výdaje** převede celý den.
-- **Převzít plán z minulého období** zkopíruje plán z předchozího období na stejná čísla dnů (bez duplicit) a pokud je rozpočet prázdný, převezme i jeho částku.
-
-### 1.8 Výdaje podle popisu
-Rozbalovací pole pod kalendářem Přehledu seskupí výdaje období podle popisu (bez ohledu na velikost písmen, prázdný = „Bez popisu“) a ukáže součet, počet a poměrný sloupec. Zahrnuje i zaúčtovaná předplatná.
-
-### 1.9 Export a záloha
-- **Stáhnout CSV tohoto období** – sloupce `Datum;Typ;Částka;Popis` (typy: Výdaj, Předplatné, Plán, Plán (převedeno)), UTF-8 s BOM pro Excel.
-- **Zálohovat všechna data (JSON)** – všechna období, predikce, předplatná, šablony a vlastní začátky období. Obnova ze zálohy zatím není implementována.
+### 1.9 Podle popisu, export a záloha
+- **Podle popisu** seskupí výdaje období podle popisu (bez ohledu na velikost písmen) se součtem, počtem a sloupcem; zahrnuje i zaúčtovaná předplatná.
+- **CSV období** (`Datum;Typ;Částka;Popis`, UTF-8 s BOM pro Excel) a **Záloha (JSON)** všech dat. Obnova ze zálohy zatím není implementována.
 
 ## 2. Výpočty
 
@@ -65,8 +57,9 @@ Rozbalovací pole pod kalendářem Přehledu seskupí výdaje období podle popi
 ### 3.1 Soubory
 | Soubor | Účel |
 |---|---|
-| `rozpocet.html` | Struktura stránky (hlavička, záložky, panely, předplatná, export) |
-| `rozpocet.js` | Stav, vykreslování, popupy, ukládání, Firestore |
+| `rozpocet.html` | Kostra stránky (období, hlavní karta, přepínač, panely, celoobrazovkové pohledy, spodní panel) |
+| `rozpocet.css` | Vzhled stránky (redesign, písmo Manrope, tokeny `--bx-*`) |
+| `rozpocet.js` | Stav, vykreslování (pomocník `h()`), spodní panel, průvodce, správa předplatných, ukládání, Firestore |
 | `budget-logic.js` | Čistá logika bez DOM/Firebase (období, migrace, předplatná, agregace, CSV, převzetí plánu) |
 | `tests/budget-logic.test.mjs` | Testy logiky (`npm test`) |
 | `styles.css` | Styly (sdílené s ostatními stránkami) |
@@ -101,9 +94,11 @@ Nepřihlášený uživatel používá jen localStorage. Přihlášený čte obdo
 - `app-guard.js` zobrazuje červenou lištu při neošetřené chybě; `sw.js` zajišťuje offline režim (PWA).
 
 ### 3.5 UI poznámky
-- Popupy jsou vykresleny v pevně umístěném modálním kontejneru (`.budget-modal-backdrop`), takže je mobilní klávesnice neposouvá (`interactive-widget=resizes-visual`). Popup dne nemá pozadí a nepřekrývá kalendář pro klikání.
-- Vstupní pole mají na dotykových zařízeních písmo 16 px, aby iOS při zaostření nepřibližoval stránku.
-- Žádné `prompt()` ani `confirm()` – vše běží v inline prvcích (fungují na mobilu).
+- Rozhraní se celé překresluje z jednoho stavu (`render()`); rozepsané hodnoty formulářů drží „koncepty“ (`entryDraft`, `bulkDraft`, `subDraft`, `tplDraft`) a po překreslení se obnoví i zaostřené pole (`data-k`), takže synchronizace z cloudu nepřeruší psaní.
+- Spodní panel je `position: fixed`, vyplňuje výšku obrazovky a je ukotven dole; s `interactive-widget=resizes-visual` ho mobilní klávesnice neposouvá.
+- Průvodce hromadného přidání a správa předplatných jsou celoobrazovkové pohledy napojené na historii prohlížeče (`pushState`/`popstate`), takže tlačítko Zpět je zavře.
+- Všechna vstupní pole mají písmo 16 px (iOS nepřibližuje), ovládací prvky mají min. 44 px, ikony jsou čárové SVG.
+- Žádné `prompt()` ani `confirm()` – potvrzení jsou vložené prvky.
 
 ### 3.6 Vývoj
 - `npm test` – testy logiky; `npm run stamp` – doplní `?v=hash` k souborům (cache-busting).

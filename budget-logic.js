@@ -107,3 +107,16 @@ export function mapPredictionsToPeriod(prevPredict, periodDays, genId) {
     }
     return { map: out, count };
 }
+
+// Nejbližší platba předplatného od daného dne (včetně); null, pokud už žádná nenastane.
+export function nextPaymentDate(sub, fromStr, horizonDays = 400) {
+    const [y, m, d] = fromStr.split("-").map(Number);
+    const cur = new Date(y, m - 1, d);
+    for (let i = 0; i <= horizonDays; i++) {
+        const ds = fmtDate(cur);
+        if (sub.until && ds > sub.until) return null;
+        if (subsOn([sub], ds).length > 0) return ds;
+        cur.setDate(cur.getDate() + 1);
+    }
+    return null;
+}

@@ -10,6 +10,7 @@ import { initNavigation } from "./navigation.js";
 
 const STORAGE_KEY = "recept.budget.v1";
 const CUSTOM_STARTS_KEY = "recept.budget.customStarts";
+const PREDICT_STORAGE_KEY = "recept.budget.predict.v1";
 const STEP = 10;
 const STEP_LG = 50;
 
@@ -17,11 +18,14 @@ const STEP_LG = 50;
 let currentUser = null;
 let unsubscribeBudget = null;
 let budgetData = null; // { amount, expenses: { "YYYY-MM-DD": number } }
+let predictData = {};  // { "YYYY-MM-DD": number } — plánované výdaje
 let periodStart = null;
 let periodEnd = null;
 let periodDays = [];
 let periodOffset = 0; // 0 = aktuální, -1 = předchozí, …
 let openDay = null;
+let openPredictDay = null;
+let activeTab = "actual";
 let customStarts = [];
 
 // ----- DOM -----
@@ -37,6 +41,15 @@ const statRemainingValueEl = document.getElementById("stat-remaining-value");
 const statRemainingArrowEl = document.getElementById("stat-remaining-arrow");
 const statDailyEl = document.getElementById("stat-daily");
 const newMonthBtn = document.getElementById("new-month-btn");
+const tabActual = document.getElementById("tab-actual");
+const tabPredict = document.getElementById("tab-predict");
+const panelActual = document.getElementById("panel-actual");
+const panelPredict = document.getElementById("panel-predict");
+const predictCalendarEl = document.getElementById("predict-calendar");
+const predStatPlannedEl = document.getElementById("pred-stat-planned");
+const predStatActualEl = document.getElementById("pred-stat-actual");
+const predStatDiffEl = document.getElementById("pred-stat-diff");
+const predStatUnplannedEl = document.getElementById("pred-stat-unplanned");
 
 // ----- Období -----
 function buildBoundaries() {
@@ -229,6 +242,7 @@ function expectedRemainingToday() {
 function goToPeriod(offset) {
     periodOffset = offset;
     openDay = null;
+    openPredictDay = null;
     computePeriod(periodOffset);
 
     todayBtn.classList.toggle("hidden", isCurrentPeriod());
@@ -250,7 +264,20 @@ function loadPeriodData() {
         unsubscribeBudget = null;
     }
 
+    // Vždy načti predikce z localStorage (Firestore sync níže)
+    loadPredictForPeriod();
+
     if (currentUser) {
+        // Načti predikce z Firestore
+        const predRef = doc(db, "users", currentUser.uid, "budget", predictKey());
+        getDoc(predRef).then((snap) => {
+            if (snap.exists() && snap.data().predictions) {
+                predictData = snap.data().predictions;
+                savePredictLocal({ ...loadPredictLocal(), [predictKey()]: predictData });
+                if (activeTab === "predict") renderPredictPanel();
+            }
+        }).catch(() => {});
+
         const ref = doc(db, "users", currentUser.uid, "budget", periodKey());
         unsubscribeBudget = onSnapshot(
             ref,
@@ -284,11 +311,73 @@ function loadPeriodData() {
     }
 }
 
+// ----- Predikce – data -----
+function predictKey() {
+    return "predict-" + periodKey();
+}
+
+function loadPredictLocal() {
+    try {
+        const raw = localStorage.getItem(PREDICT_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+}
+
+function savePredictLocal(allPredict) {
+    localStorage.setItem(PREDICT_STORAGE_KEY, JSON.stringify(allPredict));
+}
+
+function loadPredictForPeriod() {
+    const allPredict = loadPredictLocal();
+    predictData = allPredict[predictKey()] || {};
+}
+
+async function persistPredictData() {
+    const allPredict = loadPredictLocal();
+    allPredict[predictKey()] = predictData;
+    savePredictLocal(allPredict);
+    if (currentUser) {
+        try {
+            const ref = doc(db, "users", currentUser.uid, "budget", predictKey());
+            await setDoc(ref, { predictions: predictData });
+        } catch (err) { console.error(err); }
+    }
+}
+
+let predictSaveTimeout = null;
+function debouncedPredictSave() {
+    clearTimeout(predictSaveTimeout);
+    predictSaveTimeout = setTimeout(() => persistPredictData(), 400);
+}
+
+function dayPredicted(dateStr) {
+    return predictData[dateStr] || 0;
+}
+
+function totalPredicted() {
+    let sum = 0;
+    for (const day of periodDays) sum += dayPredicted(day);
+    return sum;
+}
+
+// ----- Záložky -----
+function switchTab(tab) {
+    activeTab = tab;
+    tabActual.classList.toggle("active", tab === "actual");
+    tabPredict.classList.toggle("active", tab === "predict");
+    tabActual.setAttribute("aria-selected", tab === "actual");
+    tabPredict.setAttribute("aria-selected", tab === "predict");
+    panelActual.classList.toggle("hidden", tab !== "actual");
+    panelPredict.classList.toggle("hidden", tab !== "predict");
+    if (tab === "predict") renderPredictPanel();
+}
+
 // ----- Vykreslení -----
 function render() {
     renderPeriod();
     renderSummary();
     renderCalendar();
+    if (activeTab === "predict") renderPredictPanel();
 }
 
 function renderPeriod() {
@@ -404,6 +493,196 @@ function renderCalendar() {
     calendarEl.appendChild(grid);
 }
 
+// ----- Predikční panel -----
+function renderPredictPanel() {
+    renderPredictSummary();
+    renderPredictCalendar();
+}
+
+function renderPredictSummary() {
+    const planned = totalPredicted();
+    const actual = totalSpent();
+    const diff = actual - planned;
+    const budget = budgetData.amount || 0;
+    const unplanned = Math.max(0, budget - planned);
+
+    predStatPlannedEl.textContent = fmtMoney(planned);
+    predStatActualEl.textContent = fmtMoney(actual);
+
+    predStatDiffEl.textContent = (diff >= 0 ? "+" : "") + fmtMoney(diff);
+    predStatDiffEl.className = "budget-stat-value pred-diff" +
+        (diff > 0 ? " pred-diff-over" : diff < 0 ? " pred-diff-under" : "");
+
+    predStatUnplannedEl.textContent = fmtMoney(unplanned);
+}
+
+function renderPredictCalendar() {
+    predictCalendarEl.innerHTML = "";
+    const today = fmtDate(new Date());
+
+    const dayNames = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
+    const headerRow = document.createElement("div");
+    headerRow.className = "budget-cal-header";
+    dayNames.forEach((name) => {
+        const cell = document.createElement("div");
+        cell.className = "budget-cal-dayname";
+        cell.textContent = name;
+        headerRow.appendChild(cell);
+    });
+    predictCalendarEl.appendChild(headerRow);
+
+    const grid = document.createElement("div");
+    grid.className = "budget-cal-grid";
+
+    const firstDayOfWeek = periodStart.getDay();
+    const calOffset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+    for (let i = 0; i < calOffset; i++) {
+        const empty = document.createElement("div");
+        empty.className = "budget-cal-cell budget-cal-empty";
+        grid.appendChild(empty);
+    }
+
+    const avgDaily = periodDays.length > 0 ? (budgetData.amount || 0) / periodDays.length : 0;
+
+    periodDays.forEach((dateStr) => {
+        const cell = document.createElement("div");
+        cell.className = "budget-cal-cell";
+
+        const predicted = dayPredicted(dateStr);
+        const actual = daySpent(dateStr);
+        const isPast = dateStr < today;
+        const isToday = dateStr === today;
+        const dayNum = parseInt(dateStr.split("-")[2]);
+
+        // Barevné kódování: minulé dny → porovnej plán vs skutečnost
+        //                   budoucí dny → porovnej plán vs průměrný denní budget
+        if (avgDaily > 0) {
+            if (isPast || isToday) {
+                if (predicted === 0 && actual === 0) {
+                    cell.classList.add("budget-day-neutral");
+                } else {
+                    const ref = predicted > 0 ? predicted : avgDaily;
+                    const ratio = actual / ref;
+                    if (ratio <= 1) cell.classList.add("budget-day-ok");
+                    else if (ratio <= 1.5) cell.classList.add("budget-day-warn");
+                    else cell.classList.add("budget-day-over");
+                }
+            } else {
+                if (predicted === 0) {
+                    cell.classList.add("budget-day-neutral");
+                } else {
+                    const ratio = predicted / avgDaily;
+                    if (ratio <= 1) cell.classList.add("budget-day-ok");
+                    else if (ratio <= 1.5) cell.classList.add("budget-day-warn");
+                    else cell.classList.add("budget-day-over");
+                }
+            }
+        }
+
+        if (isToday) cell.classList.add("budget-day-today");
+
+        const numEl = document.createElement("span");
+        numEl.className = "budget-cal-num";
+        numEl.textContent = dayNum;
+        cell.appendChild(numEl);
+
+        // Zobraz predikci (a pro minulé dny i skutečnost)
+        if (predicted > 0 || (isPast && actual > 0)) {
+            const lineEl = document.createElement("span");
+            lineEl.className = "budget-cal-spent";
+            if (isPast && actual > 0 && predicted > 0) {
+                lineEl.textContent = fmtMoney(actual) + " / " + fmtMoney(predicted);
+                lineEl.className = "budget-cal-spent pred-both";
+            } else if (isPast && actual > 0) {
+                lineEl.textContent = fmtMoney(actual);
+            } else if (predicted > 0) {
+                lineEl.textContent = "~ " + fmtMoney(predicted);
+                lineEl.className = "budget-cal-spent pred-planned";
+            }
+            cell.appendChild(lineEl);
+        }
+
+        cell.addEventListener("click", (e) => {
+            e.stopPropagation();
+            togglePredictBubble(dateStr);
+        });
+
+        if (openPredictDay === dateStr) {
+            cell.classList.add("budget-cell-open");
+            cell.appendChild(createPredictBubble(dateStr));
+        }
+
+        grid.appendChild(cell);
+    });
+
+    predictCalendarEl.appendChild(grid);
+}
+
+function togglePredictBubble(dateStr) {
+    openPredictDay = openPredictDay === dateStr ? null : dateStr;
+    renderPredictCalendar();
+}
+
+function createPredictBubble(dateStr) {
+    const bubble = document.createElement("div");
+    bubble.className = "budget-bubble";
+
+    const row1 = document.createElement("div");
+    row1.className = "budget-bubble-row";
+
+    const minus10 = document.createElement("button");
+    minus10.type = "button";
+    minus10.className = "budget-bubble-btn";
+    minus10.textContent = "−";
+    minus10.addEventListener("click", (e) => { e.stopPropagation(); changePrediction(dateStr, -STEP); });
+
+    const valueEl = document.createElement("span");
+    valueEl.className = "budget-bubble-value";
+    valueEl.textContent = dayPredicted(dateStr);
+
+    const plus10 = document.createElement("button");
+    plus10.type = "button";
+    plus10.className = "budget-bubble-btn";
+    plus10.textContent = "+";
+    plus10.addEventListener("click", (e) => { e.stopPropagation(); changePrediction(dateStr, STEP); });
+
+    row1.appendChild(minus10);
+    row1.appendChild(valueEl);
+    row1.appendChild(plus10);
+
+    const row2 = document.createElement("div");
+    row2.className = "budget-bubble-row";
+
+    const minus50 = document.createElement("button");
+    minus50.type = "button";
+    minus50.className = "budget-bubble-btn budget-bubble-btn-lg";
+    minus50.textContent = "−50";
+    minus50.addEventListener("click", (e) => { e.stopPropagation(); changePrediction(dateStr, -STEP_LG); });
+
+    const plus50 = document.createElement("button");
+    plus50.type = "button";
+    plus50.className = "budget-bubble-btn budget-bubble-btn-lg";
+    plus50.textContent = "+50";
+    plus50.addEventListener("click", (e) => { e.stopPropagation(); changePrediction(dateStr, STEP_LG); });
+
+    row2.appendChild(minus50);
+    row2.appendChild(plus50);
+    bubble.appendChild(row1);
+    bubble.appendChild(row2);
+    bubble.addEventListener("click", (e) => e.stopPropagation());
+    return bubble;
+}
+
+function changePrediction(dateStr, delta) {
+    const current = predictData[dateStr] || 0;
+    const next = Math.max(0, current + delta);
+    if (next === 0) delete predictData[dateStr];
+    else predictData[dateStr] = next;
+    debouncedPredictSave();
+    renderPredictSummary();
+    renderPredictCalendar();
+}
+
 // ----- Inline bublina (+/- ovládání) -----
 function toggleBubble(dateStr) {
     openDay = openDay === dateStr ? null : dateStr;
@@ -495,6 +774,10 @@ document.addEventListener("click", () => {
     if (openDay !== null) {
         openDay = null;
         renderCalendar();
+    }
+    if (openPredictDay !== null) {
+        openPredictDay = null;
+        renderPredictCalendar();
     }
 });
 
@@ -601,6 +884,8 @@ prevBtn.addEventListener("click", () => goToPeriod(periodOffset - 1));
 nextBtn.addEventListener("click", () => goToPeriod(periodOffset + 1));
 todayBtn.addEventListener("click", () => goToPeriod(0));
 newMonthBtn.addEventListener("click", startNewMonth);
+tabActual.addEventListener("click", () => switchTab("actual"));
+tabPredict.addEventListener("click", () => switchTab("predict"));
 
 // ----- Inicializace -----
 customStarts = loadCustomStartsLocal();

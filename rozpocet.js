@@ -9,10 +9,14 @@ import {
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { initNavigation } from "./navigation.js?v=476675d6";
-import * as logic from "./budget-logic.js?v=c61516c0";
+import * as logic from "./budget-logic.js?v=00b71e40";
 const { fmtDate } = logic;
 
-const REQUIRED_IDS = ["breakdown-box", "copy-prev-btn", "export-csv", "subs-until", "bulk-bar", "subs-box", "tpl-btn-actual", "tpl-btn-predict", "bulk-btn-actual", "bulk-btn-predict", "newmonth-confirm"];
+const REQUIRED_IDS = [
+    "hero", "period-label", "period-menu", "newmonth-confirm", "quick-add-btn", "tpl-btn-actual", "tpl-btn-predict",
+    "bulk-btn-actual", "bulk-btn-predict", "subs-card", "breakdown-card", "export-csv", "copy-prev-btn",
+    "view-bulk", "view-subs", "sheet", "sheet-backdrop", "predict-calendar", "budget-calendar",
+];
 if (REQUIRED_IDS.some((id) => !document.getElementById(id))) {
     try {
         if (!sessionStorage.getItem("rozpocet.reloaded")) {
@@ -27,58 +31,150 @@ try { sessionStorage.removeItem("rozpocet.reloaded"); } catch { /* ignore */ }
 const STORAGE_KEY = "recept.budget.v1";
 const CUSTOM_STARTS_KEY = "recept.budget.customStarts";
 const PREDICT_STORAGE_KEY = "recept.budget.predict.v1";
+const SUBS_KEY = "recept.budget.subs.v1";
+const TPL_KEY = "recept.budget.templates.v1";
 
 function setChildren(el, ...nodes) {
     el.textContent = "";
-    nodes.forEach((n) => el.appendChild(n));
+    nodes.flat(Infinity).forEach((n) => {
+        if (n != null && n !== false) el.append(n);
+    });
 }
 
 function withTimeout(promise, ms) {
     return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
 }
 
+// ----- Drobné pomůcky pro tvorbu DOM -----
+const ICONS = {
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/>',
+    calcheck: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18M9.5 15.5l2 2 3.5-3.5"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
+    left: '<path d="m15 6-6 6 6 6"/>',
+    right: '<path d="m9 6 6 6-6 6"/>',
+    pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    close: '<path d="M6 6l12 12M18 6 6 18"/>',
+    repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+    download: '<path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/>',
+    check: '<path d="m5 12 5 5 9-10"/>',
+    up: '<path d="M12 19V5m-6 6 6-6 6 6"/>',
+    down: '<path d="M12 5v14m-6-6 6 6 6-6"/>',
+    chev: '<path d="m6 9 6 6 6-6"/>',
+};
+
+function icon(name, size = 20) {
+    const span = document.createElement("span");
+    span.style.display = "inline-flex";
+    span.innerHTML = '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size +
+        '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        ICONS[name] + "</svg>";
+    return span;
+}
+
+function h(tag, props = {}, ...children) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+        if (v == null || v === false) continue;
+        if (k === "class") el.className = v;
+        else if (k === "text") el.textContent = v;
+        else if (k === "value") el.value = v;
+        else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+        else el.setAttribute(k, v === true ? "" : v);
+    }
+    children.flat(Infinity).forEach((c) => {
+        if (c == null || c === false) return;
+        el.append(c);
+    });
+    return el;
+}
+
+const MONTHS_GEN = ["ledna", "února", "března", "dubna", "května", "června", "července", "srpna", "září", "října", "listopadu", "prosince"];
+const WEEKDAYS_FULL = ["Neděle", "Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek", "Sobota"];
+const WEEKDAYS_SHORT = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
+
+function parseDate(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, m - 1, d);
+}
+
+function plural(n, one, few, many) {
+    if (n === 1) return one;
+    if (n >= 2 && n <= 4) return few;
+    return many;
+}
+
+function fmtNum(n) {
+    return Math.round(n).toLocaleString("cs-CZ");
+}
+
+function fmtMoney(n) {
+    return n.toLocaleString("cs-CZ") + " Kč";
+}
+
+function fmtPct(x) {
+    if (!x) return "0 %";
+    return (x < 10 ? x.toFixed(1).replace(".", ",") : String(Math.round(x))) + " %";
+}
+
 // ----- Stav -----
 let currentUser = null;
 let unsubscribeBudget = null;
 let budgetData = null; // { amount, expenses: { "YYYY-MM-DD": [{id, amount, desc}] } }
-let predictData = {};  // { "YYYY-MM-DD": [{id, amount, desc}] } — plánované výdaje
+let predictData = {};  // { "YYYY-MM-DD": [{id, amount, desc, done?}] } — plánované výdaje
 let periodStart = null;
 let periodEnd = null;
 let periodDays = [];
 let periodOffset = 0; // 0 = aktuální, -1 = předchozí, …
-let openDay = null;
-let openPredictDay = null;
-let editingEntryId = null;
 let activeTab = "actual";
 let customStarts = [];
+let subs = [];       // [{ id, name, amount, day, since, until?, paid? }]
+let templates = [];  // [{ id, name, amount }]
+
+// Stav rozhraní
+let sheet = null;            // { kind, date?, mode: "day" | "templates" | "tplform" }
+let sheetBack = null;        // kam se vrátit po formuláři šablony
+let editingEntryId = null;
+let entryDraft = { amount: "", desc: "" };
+let tplDraft = { id: null, name: "", amount: "" };
+let bulk = null;             // { kind, step: 1 | 2, amount, desc, days: Set }
+let bulkDraft = { amount: "", desc: "" };
+let subsOpen = false;
+let subDraft = null;         // { id?, name, amount, day, since, until }
+let subDeleteAsk = false;
+let editingBudget = false;
+let periodMenuOpen = false;
+let subsCardOpen = false;
+try { subsCardOpen = localStorage.getItem("recept.budget.subsCardOpen") === "1"; } catch { /* ignore */ }
 
 // ----- DOM -----
-const periodEl = document.getElementById("budget-period");
-const prevBtn = document.getElementById("period-prev");
-const nextBtn = document.getElementById("period-next");
-const todayBtn = document.getElementById("period-today");
-const amountEl = document.getElementById("budget-amount");
-const calendarEl = document.getElementById("budget-calendar");
-const statTotalEl = document.getElementById("stat-total");
-const statSpentEl = document.getElementById("stat-spent");
-const statRemainingValueEl = document.getElementById("stat-remaining-value");
-const statRemainingArrowEl = document.getElementById("stat-remaining-arrow");
-const statDailyEl = document.getElementById("stat-daily");
-const breakdownSummaryEl = document.getElementById("breakdown-summary");
-const breakdownListEl = document.getElementById("breakdown-list");
-const newMonthBtn = document.getElementById("new-month-btn");
-const newMonthConfirmEl = document.getElementById("newmonth-confirm");
-const newMonthYesBtn = document.getElementById("newmonth-yes");
-const newMonthNoBtn = document.getElementById("newmonth-no");
-const tabActual = document.getElementById("tab-actual");
-const tabPredict = document.getElementById("tab-predict");
-const panelActual = document.getElementById("panel-actual");
-const panelPredict = document.getElementById("panel-predict");
-const predictCalendarEl = document.getElementById("predict-calendar");
-const predStatPlannedEl = document.getElementById("pred-stat-planned");
-const predStatActualEl = document.getElementById("pred-stat-actual");
-const predStatDiffEl = document.getElementById("pred-stat-diff");
-const predStatUnplannedEl = document.getElementById("pred-stat-unplanned");
+const $ = (id) => document.getElementById(id);
+const periodEl = $("budget-period");
+const periodSubEl = $("period-sub");
+const prevBtn = $("period-prev");
+const nextBtn = $("period-next");
+const periodLabelBtn = $("period-label");
+const periodMenuEl = $("period-menu");
+const periodMenuHint = $("period-menu-hint");
+const todayBtn = $("period-today");
+const newMonthBtn = $("new-month-btn");
+const newMonthConfirmEl = $("newmonth-confirm");
+const heroEl = $("hero");
+const calendarEl = $("budget-calendar");
+const predictCalendarEl = $("predict-calendar");
+const predictAvgEl = $("predict-avg");
+const tabActual = $("tab-actual");
+const tabPredict = $("tab-predict");
+const panelActual = $("panel-actual");
+const panelPredict = $("panel-predict");
+const subsCardEl = $("subs-card");
+const breakdownCardEl = $("breakdown-card");
+const viewBulkEl = $("view-bulk");
+const viewSubsEl = $("view-subs");
+const sheetBackdropEl = $("sheet-backdrop");
+const sheetEl = $("sheet");
+const quickAddBtn = $("quick-add-btn");
 
 // ----- Období -----
 function buildBoundaries() {
@@ -234,55 +330,7 @@ function expectedRemainingToday() {
     return budgetData.amount - avgDaily * daysPassed;
 }
 
-// ----- Navigace mezi obdobími -----
-function periodExists(offset) {
-    const b = buildBoundaries();
-    const i = findCurrentIndex(b) + offset;
-    return i >= 0 && i < b.length;
-}
-
-function updateNavBtns() {
-    prevBtn.disabled = !periodExists(periodOffset - 1);
-    nextBtn.disabled = !periodExists(periodOffset + 1);
-}
-
-function goToPeriod(offset) {
-    if (!periodExists(offset)) return;
-    periodOffset = offset;
-    openDay = null;
-    openPredictDay = null;
-    editingEntryId = null;
-    bulk = null;
-    renderBulkBar();
-    hideNewMonthConfirm();
-    computePeriod(periodOffset);
-
-    todayBtn.classList.toggle("hidden", isCurrentPeriod());
-    updateNewMonthBtn();
-    updateNavBtns();
-
-    loadPeriodData();
-}
-
-function updateNewMonthBtn() {
-    const today = fmtDate(new Date());
-    const isFirst = today === fmtDate(periodStart);
-    newMonthBtn.classList.toggle("hidden", !isCurrentPeriod() || isFirst);
-}
-
-function showCalendarLoading() {
-    for (const el of [calendarEl, predictCalendarEl]) {
-        const wrap = document.createElement("div");
-        wrap.className = "budget-loading";
-        wrap.setAttribute("role", "status");
-        wrap.setAttribute("aria-label", "Načítání");
-        const spinner = document.createElement("div");
-        spinner.className = "budget-spinner";
-        wrap.appendChild(spinner);
-        setChildren(el, wrap);
-    }
-}
-
+// ----- Stav načítání / predikce -----
 function loadPeriodData() {
     // Zruš předchozí Firestore listener
     if (unsubscribeBudget) {
@@ -301,7 +349,7 @@ function loadPeriodData() {
             if (snap.exists() && snap.data().predictions) {
                 predictData = migrateExpenses(snap.data().predictions);
                 savePredictLocal({ ...loadPredictLocal(), [predictKey()]: predictData });
-                if (activeTab === "predict") renderPredictPanel();
+                render();
             }
         }).catch(() => {});
 
@@ -315,13 +363,11 @@ function loadPeriodData() {
                 } else {
                     budgetData = defaultBudget();
                 }
-                amountEl.value = budgetData.amount || "";
                 render();
             },
             (err) => {
                 console.error("Firestore chyba:", err);
                 budgetData = defaultBudget();
-                amountEl.value = "";
                 render();
                 alert(
                     "Nepodařilo se načíst rozpočet z cloudu. Zkontroluj Firestore pravidla.\n\n" +
@@ -333,7 +379,6 @@ function loadPeriodData() {
         const allData = loadLocal();
         budgetData = getBudgetForPeriod(allData);
         budgetData.expenses = migrateExpenses(budgetData.expenses);
-        amountEl.value = budgetData.amount || "";
         render();
     }
 }
@@ -389,910 +434,6 @@ function totalPredicted() {
     return sum;
 }
 
-// ----- Záložky -----
-function placeSubsBox() {
-    const target = document.getElementById(activeTab === "actual" ? "budget-summary" : "predict-summary");
-    target.after(document.getElementById("subs-box"));
-}
-
-function switchTab(tab) {
-    activeTab = tab;
-    placeSubsBox();
-    bulk = null;
-    openDay = null;
-    openPredictDay = null;
-    editingEntryId = null;
-    renderBulkBar();
-    tabActual.classList.toggle("active", tab === "actual");
-    tabPredict.classList.toggle("active", tab === "predict");
-    tabActual.setAttribute("aria-selected", tab === "actual");
-    tabPredict.setAttribute("aria-selected", tab === "predict");
-    panelActual.classList.toggle("hidden", tab !== "actual");
-    panelPredict.classList.toggle("hidden", tab !== "predict");
-    if (tab === "predict") renderPredictPanel();
-}
-
-// ----- Vykreslení -----
-function render() {
-    keepModalInputs = true;
-    try {
-        renderPeriod();
-        renderSummary();
-        renderCalendar();
-        if (activeTab === "predict") renderPredictPanel();
-    } finally {
-        keepModalInputs = false;
-    }
-}
-
-function renderPeriod() {
-    periodEl.textContent =
-        fmtDateCZ(fmtDate(periodStart)) + " – " + fmtDateCZ(fmtDate(periodEnd));
-}
-
-function renderBreakdown() {
-    const items = [];
-    const today = fmtDate(new Date());
-    for (const day of periodDays) {
-        for (const e of (budgetData.expenses && budgetData.expenses[day]) || []) items.push(e);
-        for (const sub of subsOn(day)) {
-            if (logic.subCharged(sub, day, today)) items.push({ desc: sub.name, amount: sub.amount });
-        }
-    }
-    const groups = logic.aggregateByDesc(items);
-    breakdownSummaryEl.textContent = "Výdaje podle popisu" + (groups.length ? " · " + groups.length : "");
-    setChildren(breakdownListEl);
-    if (groups.length === 0) {
-        const p = document.createElement("p");
-        p.className = "budget-modal-hint";
-        p.textContent = "V tomto období zatím nejsou žádné výdaje.";
-        breakdownListEl.appendChild(p);
-        return;
-    }
-    const max = groups[0].total || 1;
-    groups.forEach((g) => {
-        const row = document.createElement("div");
-        row.className = "breakdown-row";
-        const label = document.createElement("span");
-        label.className = "breakdown-label";
-        label.textContent = g.label + (g.count > 1 ? " (" + g.count + "×)" : "");
-        const value = document.createElement("strong");
-        value.textContent = fmtMoney(g.total);
-        const bar = document.createElement("div");
-        bar.className = "breakdown-bar";
-        const fill = document.createElement("div");
-        fill.className = "breakdown-fill";
-        fill.style.width = Math.max(2, Math.round((g.total / max) * 100)) + "%";
-        bar.appendChild(fill);
-        row.appendChild(label);
-        row.appendChild(value);
-        row.appendChild(bar);
-        breakdownListEl.appendChild(row);
-    });
-}
-
-function renderSummary() {
-    renderBreakdown();
-    const total = budgetData.amount || 0;
-    const spent = totalSpent();
-    const remaining = total - spent;
-    const daily = dailyBudget();
-
-    statTotalEl.textContent = fmtMoney(total);
-    statSpentEl.textContent = fmtMoney(spent);
-    statRemainingValueEl.textContent = fmtMoney(remaining);
-    statDailyEl.textContent = fmtMoney(Math.round(daily));
-
-    const expected = expectedRemainingToday();
-    if (total > 0) {
-        statRemainingArrowEl.classList.remove("hidden");
-        if (remaining < expected) {
-            statRemainingArrowEl.textContent = "▼";
-            statRemainingArrowEl.className = "budget-arrow arrow-down";
-        } else {
-            statRemainingArrowEl.textContent = "▲";
-            statRemainingArrowEl.className = "budget-arrow arrow-up";
-        }
-    } else {
-        statRemainingArrowEl.classList.add("hidden");
-    }
-}
-
-function renderCalendar() {
-    calendarEl.innerHTML = "";
-    const today = fmtDate(new Date());
-    const daily = dailyBudget();
-
-    const dayNames = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
-    const headerRow = document.createElement("div");
-    headerRow.className = "budget-cal-header";
-    dayNames.forEach((name) => {
-        const cell = document.createElement("div");
-        cell.className = "budget-cal-dayname";
-        cell.textContent = name;
-        headerRow.appendChild(cell);
-    });
-    calendarEl.appendChild(headerRow);
-
-    const grid = document.createElement("div");
-    grid.className = "budget-cal-grid";
-
-    const firstDayOfWeek = periodStart.getDay();
-    const offset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
-
-    for (let i = 0; i < offset; i++) {
-        const empty = document.createElement("div");
-        empty.className = "budget-cal-cell budget-cal-empty";
-        grid.appendChild(empty);
-    }
-
-    // Pro historické období: poměr k průměrnému dennímu budgetu
-    const avgDaily = periodDays.length > 0 ? budgetData.amount / periodDays.length : 0;
-    const colorDaily = isCurrentPeriod() ? daily : avgDaily;
-
-    periodDays.forEach((dateStr) => {
-        const cell = document.createElement("div");
-        cell.className = "budget-cal-cell";
-
-        const spent = daySpent(dateStr);
-        const dayNum = parseInt(dateStr.split("-")[2]);
-
-        if (colorDaily > 0) {
-            const ratio = spent / colorDaily;
-            if (spent === 0) {
-                cell.classList.add("budget-day-neutral");
-            } else if (ratio <= 1) {
-                cell.classList.add("budget-day-ok");
-            } else if (ratio <= 1.5) {
-                cell.classList.add("budget-day-warn");
-            } else {
-                cell.classList.add("budget-day-over");
-            }
-        }
-
-        if (dateStr === today) cell.classList.add("budget-day-today");
-
-        const numEl = document.createElement("span");
-        numEl.className = "budget-cal-num";
-        numEl.textContent = dayNum;
-        cell.appendChild(numEl);
-        if (subsOn(dateStr).length > 0) {
-            const dot = document.createElement("span");
-            dot.className = "budget-sub-dot";
-            dot.title = "Předplatné";
-            cell.appendChild(dot);
-        }
-
-        if (spent > 0) {
-            const spentEl = document.createElement("span");
-            spentEl.className = "budget-cal-spent";
-            spentEl.textContent = fmtMoney(spent);
-            cell.appendChild(spentEl);
-            const count = (budgetData.expenses[dateStr] || []).length;
-            if (count > 1) {
-                const badge = document.createElement("span");
-                badge.className = "budget-cal-count";
-                badge.textContent = count + "×";
-                cell.appendChild(badge);
-            }
-        }
-
-        cell.addEventListener("click", (e) => {
-            e.stopPropagation();
-            onDayClick("actual", dateStr);
-        });
-
-        if (openDay === dateStr) cell.classList.add("budget-cell-open");
-        if (isBulkSelected("actual", dateStr)) cell.classList.add("budget-day-selected");
-
-        grid.appendChild(cell);
-    });
-
-    calendarEl.appendChild(grid);
-    syncModal();
-}
-
-// ----- Predikční panel -----
-function renderPredictPanel() {
-    renderPredictSummary();
-    renderPredictCalendar();
-}
-
-function renderPredictSummary() {
-    const planned = totalPredicted();
-    const actual = totalSpent();
-    const diff = actual - planned;
-    const budget = budgetData.amount || 0;
-    const unplanned = Math.max(0, budget - planned);
-
-    predStatPlannedEl.textContent = fmtMoney(planned);
-    predStatActualEl.textContent = fmtMoney(actual);
-
-    predStatDiffEl.textContent = (diff >= 0 ? "+" : "") + fmtMoney(diff);
-    predStatDiffEl.className = "budget-stat-value pred-diff" +
-        (diff > 0 ? " pred-diff-over" : diff < 0 ? " pred-diff-under" : "");
-
-    predStatUnplannedEl.textContent = fmtMoney(unplanned);
-}
-
-function renderPredictCalendar() {
-    predictCalendarEl.innerHTML = "";
-    const today = fmtDate(new Date());
-
-    const dayNames = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
-    const headerRow = document.createElement("div");
-    headerRow.className = "budget-cal-header";
-    dayNames.forEach((name) => {
-        const cell = document.createElement("div");
-        cell.className = "budget-cal-dayname";
-        cell.textContent = name;
-        headerRow.appendChild(cell);
-    });
-    predictCalendarEl.appendChild(headerRow);
-
-    const grid = document.createElement("div");
-    grid.className = "budget-cal-grid";
-
-    const firstDayOfWeek = periodStart.getDay();
-    const calOffset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
-    for (let i = 0; i < calOffset; i++) {
-        const empty = document.createElement("div");
-        empty.className = "budget-cal-cell budget-cal-empty";
-        grid.appendChild(empty);
-    }
-
-    const avgDaily = periodDays.length > 0 ? (budgetData.amount || 0) / periodDays.length : 0;
-
-    periodDays.forEach((dateStr) => {
-        const cell = document.createElement("div");
-        cell.className = "budget-cal-cell";
-
-        const predicted = dayPredicted(dateStr);
-        const actual = daySpent(dateStr);
-        const isPast = dateStr < today;
-        const isToday = dateStr === today;
-        const dayNum = parseInt(dateStr.split("-")[2]);
-
-        // Barevné kódování: minulé dny → porovnej plán vs skutečnost
-        //                   budoucí dny → porovnej plán vs průměrný denní budget
-        if (avgDaily > 0) {
-            if (isPast || isToday) {
-                if (predicted === 0 && actual === 0) {
-                    cell.classList.add("budget-day-neutral");
-                } else {
-                    const ref = predicted > 0 ? predicted : avgDaily;
-                    const ratio = actual / ref;
-                    if (ratio <= 1) cell.classList.add("budget-day-ok");
-                    else if (ratio <= 1.5) cell.classList.add("budget-day-warn");
-                    else cell.classList.add("budget-day-over");
-                }
-            } else {
-                if (predicted === 0) {
-                    cell.classList.add("budget-day-neutral");
-                } else {
-                    const ratio = predicted / avgDaily;
-                    if (ratio <= 1) cell.classList.add("budget-day-ok");
-                    else if (ratio <= 1.5) cell.classList.add("budget-day-warn");
-                    else cell.classList.add("budget-day-over");
-                }
-            }
-        }
-
-        if (isToday) cell.classList.add("budget-day-today");
-
-        const numEl = document.createElement("span");
-        numEl.className = "budget-cal-num";
-        numEl.textContent = dayNum;
-        cell.appendChild(numEl);
-        if (subsOn(dateStr).length > 0) {
-            const dot = document.createElement("span");
-            dot.className = "budget-sub-dot";
-            dot.title = "Předplatné";
-            cell.appendChild(dot);
-        }
-
-        // Zobraz predikci (a pro minulé dny i skutečnost)
-        if (predicted > 0 || (isPast && actual > 0)) {
-            const lineEl = document.createElement("span");
-            lineEl.className = "budget-cal-spent";
-            if (isPast && actual > 0 && predicted > 0) {
-                lineEl.textContent = fmtMoney(actual) + " / " + fmtMoney(predicted);
-                lineEl.className = "budget-cal-spent pred-both";
-            } else if (isPast && actual > 0) {
-                lineEl.textContent = fmtMoney(actual);
-            } else if (predicted > 0) {
-                lineEl.textContent = "~ " + fmtMoney(predicted);
-                lineEl.className = "budget-cal-spent pred-planned";
-            }
-            cell.appendChild(lineEl);
-        }
-
-        cell.addEventListener("click", (e) => {
-            e.stopPropagation();
-            onDayClick("predict", dateStr);
-        });
-
-        if (openPredictDay === dateStr) cell.classList.add("budget-cell-open");
-        if (isBulkSelected("predict", dateStr)) cell.classList.add("budget-day-selected");
-
-        grid.appendChild(cell);
-    });
-
-    predictCalendarEl.appendChild(grid);
-    syncModal();
-}
-
-const predictCtx = {
-    title: "Plán",
-    entries: (d) => predictData[d] || [],
-    add: (d, amount, desc) => {
-        if (!Array.isArray(predictData[d])) predictData[d] = [];
-        predictData[d].push({ id: genId(), amount, desc });
-        afterPredictChange();
-    },
-    update: (d, id, amount, desc) => {
-        const entry = (predictData[d] || []).find((e) => e.id === id);
-        if (!entry) return;
-        entry.amount = amount;
-        entry.desc = desc;
-        editingEntryId = null;
-        afterPredictChange();
-    },
-    remove: (d, id) => {
-        predictData[d] = (predictData[d] || []).filter((e) => e.id !== id);
-        if (predictData[d].length === 0) delete predictData[d];
-        afterPredictChange();
-    },
-    rerender: () => renderPredictCalendar(),
-    complete: (d, entry) => completePrediction(d, entry),
-    completeAll: (d) => (predictData[d] || []).filter((e) => !e.done).forEach((e) => completePrediction(d, e)),
-};
-
-function completePrediction(dateStr, entry) {
-    if (entry.done) return;
-    entry.done = true;
-    if (!budgetData.expenses) budgetData.expenses = {};
-    if (!Array.isArray(budgetData.expenses[dateStr])) budgetData.expenses[dateStr] = [];
-    budgetData.expenses[dateStr].push({ id: genId(), amount: entry.amount, desc: entry.desc || "" });
-    debouncedSave();
-    debouncedPredictSave();
-    render();
-}
-
-function afterPredictChange() {
-    debouncedPredictSave();
-    renderPredictSummary();
-    renderPredictCalendar();
-}
-
-// ----- Inline bublina (+/- ovládání) -----
-const expenseCtx = {
-    title: "Výdaje",
-    entries: (d) => (budgetData.expenses && budgetData.expenses[d]) || [],
-    add: (d, amount, desc) => addEntry(d, amount, desc),
-    update: (d, id, amount, desc) => updateEntry(d, id, amount, desc),
-    remove: (d, id) => removeEntry(d, id),
-    rerender: () => renderCalendar(),
-};
-
-function createBubble(dateStr, ctx) {
-    const card = document.createElement("div");
-    card.className = "budget-modal-card";
-
-    const head = document.createElement("div");
-    head.className = "budget-modal-head";
-    const title = document.createElement("strong");
-    title.textContent = ctx.title + " – " + fmtDateCZ(dateStr);
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "budget-entry-del";
-    closeBtn.textContent = "✕";
-    closeBtn.setAttribute("aria-label", "Zavřít");
-    closeBtn.addEventListener("click", closeAllPopups);
-    head.appendChild(title);
-    head.appendChild(closeBtn);
-    card.appendChild(head);
-
-    const form = document.createElement("div");
-    form.className = "budget-entry-form";
-
-    const amtInput = document.createElement("input");
-    amtInput.type = "number";
-    amtInput.className = "budget-entry-amt";
-    amtInput.placeholder = "Kč";
-    amtInput.min = "0";
-    amtInput.step = "1";
-    amtInput.inputMode = "numeric";
-
-    const descInput = document.createElement("input");
-    descInput.type = "text";
-    descInput.className = "budget-entry-desc";
-    descInput.placeholder = "Popis…";
-    descInput.maxLength = 60;
-
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "budget-entry-add";
-    addBtn.textContent = "Přidat";
-
-    const doAdd = (e) => {
-        e.stopPropagation();
-        const amount = parseFloat(amtInput.value);
-        if (!amount || amount <= 0) { amtInput.focus(); return; }
-        ctx.add(dateStr, amount, descInput.value.trim());
-    };
-
-    addBtn.addEventListener("click", doAdd);
-    [amtInput, descInput].forEach((inp) => {
-        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(e); });
-        inp.addEventListener("click", (e) => e.stopPropagation());
-    });
-
-    form.appendChild(amtInput);
-    form.appendChild(descInput);
-    form.appendChild(addBtn);
-    card.appendChild(form);
-
-    const entries = ctx.entries(dateStr);
-    if (ctx.completeAll && entries.some((e) => !e.done)) {
-        const all = document.createElement("button");
-        all.type = "button";
-        all.className = "budget-entry-cancel budget-complete-all";
-        all.textContent = "Převést vše na výdaje";
-        all.addEventListener("click", (e) => { e.stopPropagation(); ctx.completeAll(dateStr); });
-        card.appendChild(all);
-    }
-    const subRows = subsOn(dateStr);
-    if (entries.length > 0 || subRows.length > 0) {
-        const list = document.createElement("div");
-        list.className = "budget-entry-list";
-        subRows.forEach((sub) => {
-            const row = document.createElement("div");
-            row.className = "budget-entry-row budget-entry-sub";
-            const info = document.createElement("span");
-            info.className = "budget-entry-info";
-            info.textContent = "🔁 " + fmtMoney(sub.amount) + " – " + sub.name;
-            row.appendChild(info);
-            if (ctx.title === "Výdaje") {
-                const charged = logic.subCharged(sub, dateStr, fmtDate(new Date()));
-                const toggle = document.createElement("button");
-                toggle.type = "button";
-                toggle.className = "budget-entry-cancel budget-sub-paid" + (charged ? " is-paid" : "");
-                toggle.textContent = charged ? "✓ zaplaceno" : "nezaplaceno";
-                toggle.title = "Přepnout stav platby";
-                toggle.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    if (!sub.paid) sub.paid = {};
-                    sub.paid[dateStr] = !charged;
-                    subsChanged();
-                });
-                row.appendChild(toggle);
-            }
-            list.appendChild(row);
-        });
-        entries.forEach((entry) => {
-            if (editingEntryId === entry.id) {
-                list.appendChild(createEditRow(dateStr, entry, ctx));
-                return;
-            }
-            const row = document.createElement("div");
-            row.className = "budget-entry-row";
-
-            const info = document.createElement("span");
-            info.className = "budget-entry-info";
-            info.textContent = fmtMoney(entry.amount) + (entry.desc ? " – " + entry.desc : "");
-
-            const editBtn = document.createElement("button");
-            editBtn.type = "button";
-            editBtn.className = "budget-entry-del budget-entry-edit";
-            editBtn.textContent = "✎";
-            editBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                editingEntryId = entry.id;
-                ctx.rerender();
-            });
-
-            const delBtn = document.createElement("button");
-            delBtn.type = "button";
-            delBtn.className = "budget-entry-del";
-            delBtn.textContent = "✕";
-            delBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                ctx.remove(dateStr, entry.id);
-            });
-
-            row.appendChild(info);
-            if (ctx.complete) {
-                if (entry.done) {
-                    const tag = document.createElement("span");
-                    tag.className = "budget-done-tag";
-                    tag.textContent = "✓ převedeno";
-                    row.appendChild(tag);
-                } else {
-                    const done = document.createElement("button");
-                    done.type = "button";
-                    done.className = "budget-entry-cancel budget-sub-paid";
-                    done.textContent = "→ výdaj";
-                    done.title = "Převést na skutečný výdaj";
-                    done.addEventListener("click", (e) => {
-                        e.stopPropagation();
-                        ctx.complete(dateStr, entry);
-                    });
-                    row.appendChild(done);
-                }
-            }
-            row.appendChild(editBtn);
-            row.appendChild(delBtn);
-            list.appendChild(row);
-        });
-        card.appendChild(list);
-    }
-
-    card.addEventListener("click", (e) => e.stopPropagation());
-    return card;
-}
-
-function createEditRow(dateStr, entry, ctx) {
-    const row = document.createElement("div");
-    row.className = "budget-entry-row budget-entry-editing";
-
-    const amt = document.createElement("input");
-    amt.type = "number";
-    amt.className = "budget-entry-amt";
-    amt.min = "0";
-    amt.step = "1";
-    amt.inputMode = "numeric";
-    amt.value = entry.amount;
-
-    const desc = document.createElement("input");
-    desc.type = "text";
-    desc.className = "budget-entry-desc";
-    desc.maxLength = 60;
-    desc.value = entry.desc || "";
-
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "budget-entry-add";
-    save.textContent = "✓";
-
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "budget-entry-cancel";
-    cancel.textContent = "✕";
-
-    const doSave = (e) => {
-        e.stopPropagation();
-        const v = parseFloat(amt.value);
-        if (!v || v <= 0) { amt.focus(); return; }
-        ctx.update(dateStr, entry.id, v, desc.value.trim());
-    };
-    save.addEventListener("click", doSave);
-    cancel.addEventListener("click", (e) => {
-        e.stopPropagation();
-        editingEntryId = null;
-        ctx.rerender();
-    });
-    [amt, desc].forEach((inp) => {
-        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doSave(e); });
-        inp.addEventListener("click", (e) => e.stopPropagation());
-    });
-
-    row.appendChild(amt);
-    row.appendChild(desc);
-    row.appendChild(save);
-    row.appendChild(cancel);
-    return row;
-}
-
-function updateEntry(dateStr, entryId, amount, desc) {
-    const list = budgetData.expenses && budgetData.expenses[dateStr];
-    if (!Array.isArray(list)) return;
-    const entry = list.find((e) => e.id === entryId);
-    if (!entry) return;
-    entry.amount = amount;
-    entry.desc = desc;
-    editingEntryId = null;
-    debouncedSave();
-    renderSummary();
-    renderCalendar();
-}
-
-function addEntry(dateStr, amount, desc) {
-    if (!budgetData.expenses) budgetData.expenses = {};
-    if (!Array.isArray(budgetData.expenses[dateStr])) budgetData.expenses[dateStr] = [];
-    budgetData.expenses[dateStr].push({ id: genId(), amount, desc });
-    debouncedSave();
-    renderSummary();
-    renderCalendar();
-}
-
-function removeEntry(dateStr, entryId) {
-    if (!budgetData.expenses || !Array.isArray(budgetData.expenses[dateStr])) return;
-    budgetData.expenses[dateStr] = budgetData.expenses[dateStr].filter((e) => e.id !== entryId);
-    if (budgetData.expenses[dateStr].length === 0) delete budgetData.expenses[dateStr];
-    debouncedSave();
-    renderSummary();
-    renderCalendar();
-}
-
-function closeAllPopups() {
-    const hadDay = openDay !== null;
-    const hadPredict = openPredictDay !== null;
-    const hadBulkForm = bulk && bulk.step === "form";
-    tplMenuKind = null;
-    tplFormKind = null;
-    tplEditId = null;
-    renderTplMenus();
-    openDay = null;
-    openPredictDay = null;
-    editingEntryId = null;
-    if (hadBulkForm) bulk = null;
-    if (hadDay) renderCalendar();
-    if (hadPredict) renderPredictCalendar();
-    if (hadBulkForm) { renderCalendar(); renderPredictCalendar(); }
-    syncModal();
-    renderBulkBar();
-}
-
-document.addEventListener("click", closeAllPopups);
-
-// ----- Modální okno (pevná pozice, klávesnice s ním nehýbe) -----
-const modalHost = document.createElement("div");
-modalHost.className = "budget-modal-backdrop hidden";
-document.body.appendChild(modalHost);
-
-function syncModal() {
-    let card = null;
-    if (tplFormKind) card = createTemplateForm();
-    else if (bulk && bulk.step === "form") card = createBulkForm();
-    else if (!bulk && activeTab === "actual" && openDay) card = createBubble(openDay, expenseCtx);
-    else if (!bulk && activeTab === "predict" && openPredictDay) card = createBubble(openPredictDay, predictCtx);
-
-    if (!card) {
-        modalHost.classList.add("hidden");
-        setChildren(modalHost);
-        return;
-    }
-    const isDayPopup = !tplFormKind && !bulk;
-    modalHost.classList.toggle("budget-modal-passthrough", isDayPopup);
-    const saved = keepModalInputs ? captureModalInputs() : null;
-    setChildren(modalHost, card);
-    modalHost.classList.remove("hidden");
-    if (saved) restoreModalInputs(saved);
-}
-
-let keepModalInputs = false;
-
-function captureModalInputs() {
-    const inputs = [...modalHost.querySelectorAll("input")];
-    if (inputs.length === 0) return null;
-    return { values: inputs.map((i) => i.value), focus: inputs.indexOf(document.activeElement) };
-}
-
-function restoreModalInputs(saved) {
-    const inputs = [...modalHost.querySelectorAll("input")];
-    if (inputs.length !== saved.values.length) return;
-    inputs.forEach((inp, i) => { inp.value = saved.values[i]; });
-    if (saved.focus >= 0) inputs[saved.focus].focus();
-}
-
-// ----- Hromadné přidání -----
-let bulk = null; // { kind, step: "form" | "select", amount, desc, days: Set }
-const bulkBarEl = document.getElementById("bulk-bar");
-
-function isBulkSelected(kind, dateStr) {
-    return !!(bulk && bulk.step === "select" && bulk.kind === kind && bulk.days.has(dateStr));
-}
-
-function rerenderKind(kind) {
-    if (kind === "actual") renderCalendar();
-    else renderPredictCalendar();
-}
-
-function onDayClick(kind, dateStr) {
-    if (bulk) {
-        if (bulk.step !== "select" || bulk.kind !== kind) return;
-        if (bulk.days.has(dateStr)) bulk.days.delete(dateStr);
-        else bulk.days.add(dateStr);
-        rerenderKind(kind);
-        renderBulkBar();
-        return;
-    }
-    editingEntryId = null;
-    if (kind === "actual") {
-        openDay = openDay === dateStr ? null : dateStr;
-        renderCalendar();
-    } else {
-        openPredictDay = openPredictDay === dateStr ? null : dateStr;
-        renderPredictCalendar();
-    }
-}
-
-function startBulk(kind, preset) {
-    openDay = null;
-    openPredictDay = null;
-    editingEntryId = null;
-    tplMenuKind = null;
-    tplFormKind = null;
-    bulk = preset
-        ? { kind, step: "select", amount: preset.amount, desc: preset.name, days: new Set() }
-        : { kind, step: "form", amount: 0, desc: "", days: new Set() };
-    renderTplMenus();
-    renderCalendar();
-    renderPredictCalendar();
-    renderBulkBar();
-}
-
-function cancelBulk() {
-    if (!bulk) return;
-    bulk = null;
-    renderCalendar();
-    renderPredictCalendar();
-    renderBulkBar();
-}
-
-function createBulkForm() {
-    const card = document.createElement("div");
-    card.className = "budget-modal-card";
-
-    const head = document.createElement("div");
-    head.className = "budget-modal-head";
-    const title = document.createElement("strong");
-    title.textContent = "Hromadné přidání – " + (bulk.kind === "actual" ? "výdaje" : "plán");
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "budget-entry-del";
-    closeBtn.textContent = "✕";
-    closeBtn.setAttribute("aria-label", "Zavřít");
-    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); cancelBulk(); });
-    head.appendChild(title);
-    head.appendChild(closeBtn);
-    card.appendChild(head);
-
-    const form = document.createElement("div");
-    form.className = "budget-entry-form";
-
-    const amt = document.createElement("input");
-    amt.type = "number";
-    amt.className = "budget-entry-amt";
-    amt.placeholder = "Kč";
-    amt.min = "0";
-    amt.step = "1";
-    amt.inputMode = "numeric";
-    if (bulk.amount) amt.value = bulk.amount;
-
-    const desc = document.createElement("input");
-    desc.type = "text";
-    desc.className = "budget-entry-desc";
-    desc.placeholder = "Popis…";
-    desc.maxLength = 60;
-    desc.value = bulk.desc;
-
-    form.appendChild(amt);
-    form.appendChild(desc);
-    card.appendChild(form);
-
-    const hint = document.createElement("p");
-    hint.className = "budget-modal-hint";
-    hint.textContent = "Po kliknutí na Dál označ v kalendáři dny, kterým se částka přidá.";
-    card.appendChild(hint);
-
-    const actions = document.createElement("div");
-    actions.className = "budget-confirm-actions";
-    const next = document.createElement("button");
-    next.type = "button";
-    next.className = "budget-entry-add";
-    next.textContent = "Dál – vybrat dny";
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "budget-entry-cancel";
-    cancel.textContent = "Zrušit";
-
-    const goNext = (e) => {
-        e.stopPropagation();
-        const v = parseFloat(amt.value);
-        if (!v || v <= 0) { amt.focus(); return; }
-        bulk.amount = v;
-        bulk.desc = desc.value.trim();
-        bulk.step = "select";
-        syncModal();
-        renderBulkBar();
-    };
-    next.addEventListener("click", goNext);
-    cancel.addEventListener("click", (e) => { e.stopPropagation(); cancelBulk(); });
-    [amt, desc].forEach((inp) => {
-        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") goNext(e); });
-        inp.addEventListener("click", (e) => e.stopPropagation());
-    });
-    actions.appendChild(next);
-    actions.appendChild(cancel);
-    card.appendChild(actions);
-
-    card.addEventListener("click", (e) => e.stopPropagation());
-    return card;
-}
-
-function renderBulkBar() {
-    if (!bulk || bulk.step !== "select") {
-        bulkBarEl.classList.add("hidden");
-        setChildren(bulkBarEl);
-        document.body.classList.remove("bulk-active");
-        return;
-    }
-    const count = bulk.days.size;
-
-    const info = document.createElement("div");
-    info.className = "bulk-bar-info";
-    const line1 = document.createElement("strong");
-    line1.textContent = fmtMoney(bulk.amount) + (bulk.desc ? " – " + bulk.desc : "");
-    const line2 = document.createElement("span");
-    line2.textContent = count === 0
-        ? "Klikni v kalendáři na dny (min. 1)"
-        : "Vybráno dnů: " + count + " · celkem " + fmtMoney(bulk.amount * count);
-    info.appendChild(line1);
-    info.appendChild(line2);
-
-    const actions = document.createElement("div");
-    actions.className = "budget-confirm-actions";
-
-    const apply = document.createElement("button");
-    apply.type = "button";
-    apply.className = "budget-entry-add";
-    apply.textContent = "Přidat";
-    apply.disabled = count === 0;
-    apply.addEventListener("click", (e) => { e.stopPropagation(); applyBulk(); });
-
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "budget-entry-cancel";
-    edit.textContent = "Upravit";
-    edit.addEventListener("click", (e) => { e.stopPropagation(); bulk.step = "form"; syncModal(); renderBulkBar(); });
-
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "budget-entry-cancel";
-    cancel.textContent = "Zrušit";
-    cancel.addEventListener("click", (e) => { e.stopPropagation(); cancelBulk(); });
-
-    actions.appendChild(apply);
-    actions.appendChild(edit);
-    actions.appendChild(cancel);
-
-    setChildren(bulkBarEl, info, actions);
-    bulkBarEl.classList.remove("hidden");
-    document.body.classList.add("bulk-active");
-}
-
-function applyBulk() {
-    if (!bulk || bulk.days.size === 0) return;
-    const { kind, amount, desc } = bulk;
-    const days = [...bulk.days];
-    if (kind === "actual") {
-        if (!budgetData.expenses) budgetData.expenses = {};
-        for (const d of days) {
-            if (!Array.isArray(budgetData.expenses[d])) budgetData.expenses[d] = [];
-            budgetData.expenses[d].push({ id: genId(), amount, desc });
-        }
-        debouncedSave();
-    } else {
-        for (const d of days) {
-            if (!Array.isArray(predictData[d])) predictData[d] = [];
-            predictData[d].push({ id: genId(), amount, desc });
-        }
-        debouncedPredictSave();
-    }
-    bulk = null;
-    renderSummary();
-    renderCalendar();
-    renderPredictSummary();
-    renderPredictCalendar();
-    renderBulkBar();
-}
-
-function fmtMoney(n) {
-    return n.toLocaleString("cs-CZ") + " Kč";
-}
-
 // ----- Vlastní začátky období -----
 function loadCustomStartsLocal() {
     try { return JSON.parse(localStorage.getItem(CUSTOM_STARTS_KEY) || "[]"); }
@@ -1323,14 +464,6 @@ async function persistCustomStarts() {
             await setDoc(ref, { customStarts });
         } catch (err) { console.error("Failed to save custom starts:", err); }
     }
-}
-
-function hideNewMonthConfirm() {
-    newMonthConfirmEl.classList.add("hidden");
-}
-
-function showNewMonthConfirm() {
-    newMonthConfirmEl.classList.remove("hidden");
 }
 
 async function startNewMonth() {
@@ -1381,34 +514,10 @@ async function startNewMonth() {
     }
 
     budgetData = newBudget;
-    amountEl.value = budgetData.amount || "";
     await persistBudgetData();
 
     loadPeriodData();
 }
-
-// ----- Změna rozpočtu -----
-function onBudgetAmountChange() {
-    if (!budgetData) return;
-    budgetData.amount = parseFloat(amountEl.value) || 0;
-    renderSummary();
-    renderCalendar();
-    debouncedSave();
-}
-
-// ----- Předplatná (opakující se měsíční platby) -----
-const SUBS_KEY = "recept.budget.subs.v1";
-let subs = []; // [{ id, name, amount, day, since }]
-let editingSubId = null;
-
-const subsSummaryEl = document.getElementById("subs-summary");
-const subsListEl = document.getElementById("subs-list");
-const subsNameEl = document.getElementById("subs-name");
-const subsAmountEl = document.getElementById("subs-amount");
-const subsDayEl = document.getElementById("subs-day");
-const subsSinceEl = document.getElementById("subs-since");
-const subsUntilEl = document.getElementById("subs-until");
-const subsAddBtn = document.getElementById("subs-add");
 
 function loadSubsLocal() {
     try {
@@ -1457,151 +566,6 @@ function currentPeriodStart() {
     return b[findCurrentIndex(b)];
 }
 
-function subsChanged() {
-    persistSubs();
-    renderSubs();
-    if (budgetData) render();
-}
-
-function renderSubs() {
-    const total = subs.reduce((t, s) => t + s.amount, 0);
-    subsSummaryEl.textContent = "Předplatná" + (subs.length ? " · " + subs.length + " · " + fmtMoney(total) + " / měs." : "");
-
-    setChildren(subsListEl);
-    [...subs].sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, "cs")).forEach((sub) => {
-        if (editingSubId === sub.id) {
-            subsListEl.appendChild(createSubEditRow(sub));
-            return;
-        }
-        const row = document.createElement("div");
-        row.className = "budget-entry-row";
-
-        const info = document.createElement("span");
-        info.className = "budget-entry-info";
-        info.textContent = sub.name + " – " + fmtMoney(sub.amount) + " (" + sub.day + ". v měsíci" + (sub.until ? ", do " + fmtDateCZ(sub.until) : "") + ")";
-
-        const editBtn = document.createElement("button");
-        editBtn.type = "button";
-        editBtn.className = "budget-entry-del budget-entry-edit";
-        editBtn.textContent = "✎";
-        editBtn.addEventListener("click", () => { editingSubId = sub.id; renderSubs(); });
-
-        const delBtn = document.createElement("button");
-        delBtn.type = "button";
-        delBtn.className = "budget-entry-del";
-        delBtn.textContent = "✕";
-        delBtn.addEventListener("click", () => {
-            subs = subs.filter((s) => s.id !== sub.id);
-            subsChanged();
-        });
-
-        row.appendChild(info);
-        row.appendChild(editBtn);
-        row.appendChild(delBtn);
-        subsListEl.appendChild(row);
-    });
-}
-
-function createSubEditRow(sub) {
-    const row = document.createElement("div");
-    row.className = "budget-entry-row budget-entry-editing";
-
-    const name = document.createElement("input");
-    name.type = "text";
-    name.className = "budget-entry-desc";
-    name.maxLength = 40;
-    name.value = sub.name;
-
-    const amt = document.createElement("input");
-    amt.type = "number";
-    amt.className = "budget-entry-amt";
-    amt.min = "0";
-    amt.inputMode = "numeric";
-    amt.value = sub.amount;
-
-    const day = document.createElement("input");
-    day.type = "number";
-    day.className = "budget-entry-amt";
-    day.min = "1";
-    day.max = "31";
-    day.inputMode = "numeric";
-    day.value = sub.day;
-
-    const until = document.createElement("input");
-    until.type = "date";
-    until.className = "budget-entry-desc";
-    until.title = "Platí do (nepovinné)";
-    until.value = sub.until || "";
-
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "budget-entry-add";
-    save.textContent = "✓";
-    save.addEventListener("click", () => {
-        const a = parseFloat(amt.value);
-        const d = parseInt(day.value, 10);
-        const n = name.value.trim();
-        if (!n) { name.focus(); return; }
-        if (!a || a <= 0) { amt.focus(); return; }
-        if (!d || d < 1 || d > 31) { day.focus(); return; }
-        sub.name = n;
-        sub.amount = a;
-        sub.day = d;
-        if (until.value) sub.until = until.value;
-        else delete sub.until;
-        editingSubId = null;
-        subsChanged();
-    });
-
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "budget-entry-cancel";
-    cancel.textContent = "✕";
-    cancel.addEventListener("click", () => { editingSubId = null; renderSubs(); });
-
-    row.appendChild(name);
-    row.appendChild(amt);
-    row.appendChild(day);
-    row.appendChild(until);
-    row.appendChild(save);
-    row.appendChild(cancel);
-    return row;
-}
-
-function addSubscription() {
-    const name = subsNameEl.value.trim();
-    const amount = parseFloat(subsAmountEl.value);
-    const day = parseInt(subsDayEl.value, 10);
-    if (!name) { subsNameEl.focus(); return; }
-    if (!amount || amount <= 0) { subsAmountEl.focus(); return; }
-    if (!day || day < 1 || day > 31) { subsDayEl.focus(); return; }
-    subs.push({
-        id: genId(),
-        name,
-        amount,
-        day,
-        since: subsSinceEl.value || currentPeriodStart(),
-        ...(subsUntilEl.value ? { until: subsUntilEl.value } : {}),
-    });
-    subsNameEl.value = "";
-    subsAmountEl.value = "";
-    subsDayEl.value = "";
-    subsSinceEl.value = currentPeriodStart();
-    subsUntilEl.value = "";
-    subsChanged();
-}
-
-subsAddBtn.addEventListener("click", addSubscription);
-[subsNameEl, subsAmountEl, subsDayEl].forEach((el) =>
-    el.addEventListener("keydown", (e) => { if (e.key === "Enter") addSubscription(); }));
-
-// ----- Šablony útrat -----
-const TPL_KEY = "recept.budget.templates.v1";
-let templates = []; // [{ id, name, amount }]
-let tplMenuKind = null;
-let tplFormKind = null;
-let tplEditId = null;
-
 function loadTemplatesLocal() {
     try {
         const a = JSON.parse(localStorage.getItem(TPL_KEY) || "[]");
@@ -1629,161 +593,15 @@ async function persistTemplates() {
     }
 }
 
-function renderTplMenus() {
-    ["actual", "predict"].forEach((kind) => {
-        const menu = document.getElementById("tpl-menu-" + kind);
-        setChildren(menu);
-        menu.classList.toggle("hidden", tplMenuKind !== kind);
-        if (tplMenuKind !== kind) return;
-
-        if (templates.length === 0) {
-            const empty = document.createElement("p");
-            empty.className = "budget-modal-hint";
-            empty.textContent = "Zatím žádné šablony.";
-            menu.appendChild(empty);
-        }
-        templates.forEach((t) => {
-            const item = document.createElement("div");
-            item.className = "tpl-item";
-
-            const use = document.createElement("button");
-            use.type = "button";
-            use.className = "tpl-use";
-            use.textContent = (t.name ? t.name + " – " : "") + fmtMoney(t.amount);
-            use.addEventListener("click", (e) => { e.stopPropagation(); startBulk(kind, t); });
-
-            const edit = document.createElement("button");
-            edit.type = "button";
-            edit.className = "budget-entry-del budget-entry-edit";
-            edit.textContent = "✎";
-            edit.setAttribute("aria-label", "Upravit šablonu");
-            edit.addEventListener("click", (e) => {
-                e.stopPropagation();
-                tplEditId = t.id;
-                tplFormKind = kind;
-                tplMenuKind = null;
-                renderTplMenus();
-                syncModal();
-            });
-
-            const del = document.createElement("button");
-            del.type = "button";
-            del.className = "budget-entry-del";
-            del.textContent = "✕";
-            del.setAttribute("aria-label", "Smazat šablonu");
-            del.addEventListener("click", (e) => {
-                e.stopPropagation();
-                templates = templates.filter((x) => x.id !== t.id);
-                persistTemplates();
-                renderTplMenus();
-            });
-
-            item.appendChild(use);
-            item.appendChild(edit);
-            item.appendChild(del);
-            menu.appendChild(item);
-        });
-
-        const add = document.createElement("button");
-        add.type = "button";
-        add.className = "tpl-new";
-        add.textContent = "＋ Nová šablona";
-        add.addEventListener("click", (e) => {
-            e.stopPropagation();
-            tplEditId = null;
-            tplFormKind = kind;
-            tplMenuKind = null;
-            renderTplMenus();
-            syncModal();
-        });
-        menu.appendChild(add);
-        menu.addEventListener("click", (e) => e.stopPropagation());
-    });
-}
-
-function toggleTplMenu(kind) {
-    const open = tplMenuKind === kind;
-    closeAllPopups();
-    tplMenuKind = open ? null : kind;
-    renderTplMenus();
-}
-
-function createTemplateForm() {
-    const kind = tplFormKind;
-    const editing = tplEditId ? templates.find((t) => t.id === tplEditId) : null;
-    const card = document.createElement("div");
-    card.className = "budget-modal-card";
-
-    const head = document.createElement("div");
-    head.className = "budget-modal-head";
-    const title = document.createElement("strong");
-    title.textContent = editing ? "Upravit šablonu" : "Nová šablona";
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "budget-entry-del";
-    closeBtn.textContent = "✕";
-    closeBtn.setAttribute("aria-label", "Zavřít");
-    closeBtn.addEventListener("click", closeAllPopups);
-    head.appendChild(title);
-    head.appendChild(closeBtn);
-    card.appendChild(head);
-
-    const form = document.createElement("div");
-    form.className = "budget-entry-form";
-
-    const amt = document.createElement("input");
-    amt.type = "number";
-    amt.className = "budget-entry-amt";
-    amt.placeholder = "Kč";
-    amt.min = "0";
-    amt.step = "1";
-    amt.inputMode = "numeric";
-
-    const name = document.createElement("input");
-    name.type = "text";
-    name.className = "budget-entry-desc";
-    name.placeholder = "Název / popis…";
-    name.maxLength = 60;
-    if (editing) {
-        amt.value = editing.amount;
-        name.value = editing.name || "";
-    }
-
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "budget-entry-add";
-    save.textContent = "Uložit";
-
-    const doSave = (e) => {
-        e.stopPropagation();
-        const v = parseFloat(amt.value);
-        if (!v || v <= 0) { amt.focus(); return; }
-        if (editing) {
-            editing.name = name.value.trim();
-            editing.amount = v;
-        } else {
-            templates.push({ id: genId(), name: name.value.trim(), amount: v });
-        }
-        persistTemplates();
-        tplEditId = null;
-        tplFormKind = null;
-        tplMenuKind = kind;
-        renderTplMenus();
-        syncModal();
-    };
-    save.addEventListener("click", doSave);
-    [amt, name].forEach((inp) => {
-        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doSave(e); });
-        inp.addEventListener("click", (e) => e.stopPropagation());
-    });
-
-    form.appendChild(amt);
-    form.appendChild(name);
-    form.appendChild(save);
-    card.appendChild(form);
-
-    card.addEventListener("click", (e) => e.stopPropagation());
-    return card;
+function completePrediction(dateStr, entry) {
+    if (entry.done) return;
+    entry.done = true;
+    if (!budgetData.expenses) budgetData.expenses = {};
+    if (!Array.isArray(budgetData.expenses[dateStr])) budgetData.expenses[dateStr] = [];
+    budgetData.expenses[dateStr].push({ id: genId(), amount: entry.amount, desc: entry.desc || "" });
+    debouncedSave();
+    debouncedPredictSave();
+    render();
 }
 
 // ----- Převzetí plánu z minulého období -----
@@ -1820,7 +638,6 @@ async function copyFromPreviousPeriod() {
     let amountSet = false;
     if (!budgetData.amount && prevAmount) {
         budgetData.amount = prevAmount;
-        amountEl.value = prevAmount;
         amountSet = true;
         debouncedSave();
     }
@@ -1899,41 +716,1051 @@ async function exportAll() {
 exportCsvBtn.addEventListener("click", () => { if (budgetData) exportCsv(); });
 exportJsonBtn.addEventListener("click", exportAll);
 
-// ----- Event listeners -----
-amountEl.addEventListener("input", onBudgetAmountChange);
+// ----- Navigace mezi obdobími -----
+function periodExists(offset) {
+    const b = buildBoundaries();
+    const i = findCurrentIndex(b) + offset;
+    return i >= 0 && i < b.length;
+}
+
+function updateNavBtns() {
+    prevBtn.disabled = !periodExists(periodOffset - 1);
+    nextBtn.disabled = !periodExists(periodOffset + 1);
+}
+
+function goToPeriod(offset) {
+    if (!periodExists(offset)) return;
+    periodOffset = offset;
+    sheet = null;
+    sheetBack = null;
+    editingEntryId = null;
+    periodMenuOpen = false;
+    hideNewMonthConfirm();
+    computePeriod(periodOffset);
+    updateNavBtns();
+    renderPeriod();
+    loadPeriodData();
+}
+
+function showCalendarLoading() {
+    for (const el of [calendarEl, predictCalendarEl]) {
+        setChildren(el, h("div", { class: "budget-loading", role: "status", "aria-label": "Načítání" }, h("div", { class: "budget-spinner" })));
+    }
+}
+
+function hideNewMonthConfirm() {
+    newMonthConfirmEl.classList.add("hidden");
+}
+
+function updatePeriodMenu() {
+    const canNew = isCurrentPeriod() && fmtDate(new Date()) !== fmtDate(periodStart);
+    todayBtn.classList.toggle("hidden", isCurrentPeriod());
+    newMonthBtn.classList.toggle("hidden", !canNew);
+    periodMenuHint.classList.toggle("hidden", !(isCurrentPeriod() && !canNew));
+    periodMenuEl.classList.toggle("hidden", !periodMenuOpen);
+    periodLabelBtn.setAttribute("aria-expanded", String(periodMenuOpen));
+}
+
+// ----- Zápis položek (výdaje / plán) -----
+const actualCtx = {
+    entries: (d) => (budgetData.expenses && budgetData.expenses[d]) || [],
+    add(d, amount, desc) {
+        if (!budgetData.expenses) budgetData.expenses = {};
+        if (!Array.isArray(budgetData.expenses[d])) budgetData.expenses[d] = [];
+        budgetData.expenses[d].push({ id: genId(), amount, desc });
+        debouncedSave();
+        render();
+    },
+    update(d, id, amount, desc) {
+        const e = ((budgetData.expenses && budgetData.expenses[d]) || []).find((x) => x.id === id);
+        if (!e) return;
+        e.amount = amount;
+        e.desc = desc;
+        editingEntryId = null;
+        debouncedSave();
+        render();
+    },
+    remove(d, id) {
+        if (!budgetData.expenses || !Array.isArray(budgetData.expenses[d])) return;
+        budgetData.expenses[d] = budgetData.expenses[d].filter((x) => x.id !== id);
+        if (budgetData.expenses[d].length === 0) delete budgetData.expenses[d];
+        debouncedSave();
+        render();
+    },
+};
+
+const predictCtx = {
+    entries: (d) => predictData[d] || [],
+    add(d, amount, desc) {
+        if (!Array.isArray(predictData[d])) predictData[d] = [];
+        predictData[d].push({ id: genId(), amount, desc });
+        debouncedPredictSave();
+        render();
+    },
+    update(d, id, amount, desc) {
+        const e = (predictData[d] || []).find((x) => x.id === id);
+        if (!e) return;
+        e.amount = amount;
+        e.desc = desc;
+        editingEntryId = null;
+        debouncedPredictSave();
+        render();
+    },
+    remove(d, id) {
+        predictData[d] = (predictData[d] || []).filter((x) => x.id !== id);
+        if (predictData[d].length === 0) delete predictData[d];
+        debouncedPredictSave();
+        render();
+    },
+    complete: (d, entry) => completePrediction(d, entry),
+    completeAll: (d) => (predictData[d] || []).filter((e) => !e.done).forEach((e) => completePrediction(d, e)),
+};
+
+function ctxFor(kind) {
+    return kind === "actual" ? actualCtx : predictCtx;
+}
+
+// ----- Vykreslení -----
+function captureFocus() {
+    const a = document.activeElement;
+    if (a && a.dataset && a.dataset.k) return { k: a.dataset.k, s: a.selectionStart, e: a.selectionEnd };
+    return null;
+}
+
+function restoreFocus(f) {
+    if (!f) return;
+    const el = document.querySelector('[data-k="' + f.k + '"]');
+    if (!el || document.activeElement === el) return;
+    el.focus();
+    try { if (f.s != null) el.setSelectionRange(f.s, f.e); } catch { /* number input */ }
+}
+
+function render() {
+    if (!budgetData) return;
+    const focus = captureFocus();
+    renderPeriod();
+    renderHero();
+    renderCalendars();
+    renderSubsCard();
+    renderBreakdown();
+    renderSheet();
+    renderBulk();
+    renderSubsView();
+    document.body.style.overflow = sheet || bulk || subsOpen ? "hidden" : "";
+    if (editingBudget) {
+        const inp = heroEl.querySelector('[data-k="budget"]');
+        if (inp && document.activeElement !== inp) { inp.focus(); inp.select(); }
+    } else {
+        restoreFocus(focus);
+    }
+}
+
+function fmtShort(dateStr) {
+    const d = parseDate(dateStr);
+    return d.getDate() + ". " + (d.getMonth() + 1) + ".";
+}
+
+function fmtRange() {
+    const a = fmtDate(periodStart);
+    const b = fmtDate(periodEnd);
+    const sameYear = a.slice(0, 4) === b.slice(0, 4);
+    return fmtShort(a) + (sameYear ? "" : " " + a.slice(0, 4)) + " – " + fmtShort(b) + " " + b.slice(0, 4);
+}
+
+function renderPeriod() {
+    periodEl.textContent = fmtRange();
+    const n = periodDays.length;
+    if (periodOffset === 0) {
+        const idx = periodDays.indexOf(fmtDate(new Date()));
+        periodSubEl.textContent = "Aktuální období · den " + (idx + 1) + " z " + n;
+    } else {
+        periodSubEl.textContent = (periodOffset < 0 ? "Minulé" : "Budoucí") + " období · " + n + " " + plural(n, "den", "dny", "dní");
+    }
+    quickAddBtn.classList.toggle("hidden", !isCurrentPeriod());
+    updatePeriodMenu();
+    updateNavBtns();
+}
+
+function paceInfo() {
+    const amount = budgetData.amount || 0;
+    const today = fmtDate(new Date());
+    const avg = periodDays.length ? amount / periodDays.length : 0;
+    let passed = 0;
+    if (periodOffset < 0) passed = periodDays.length;
+    else if (periodOffset === 0) passed = periodDays.filter((d) => d <= today).length;
+    return { amount, avg, pace: avg * passed };
+}
+
+function heroStat(label, value) {
+    return h("div", { class: "bx-stat" },
+        h("div", { class: "bx-stat-label", text: label }),
+        h("div", { class: "bx-stat-value", text: value }));
+}
+
+function commitBudget(e) {
+    if (!editingBudget) return;
+    editingBudget = false;
+    const v = parseFloat(e.target.value);
+    budgetData.amount = isNaN(v) || v < 0 ? 0 : v;
+    debouncedSave();
+    render();
+}
+
+function budgetStat(amount) {
+    if (editingBudget) {
+        return h("div", { class: "bx-stat" },
+            h("div", { class: "bx-stat-label", text: "Rozpočet" }),
+            h("input", {
+                class: "bx-stat-input", type: "number", inputmode: "numeric", min: "0", step: "100",
+                "data-k": "budget", "aria-label": "Rozpočet na období", value: amount || "",
+                onblur: commitBudget,
+                onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); },
+            }));
+    }
+    return h("button", {
+        type: "button", class: "bx-stat", "aria-label": "Upravit rozpočet na období",
+        onclick: () => { editingBudget = true; render(); },
+    },
+    h("div", { class: "bx-stat-label" }, "Rozpočet", icon("pencil", 12)),
+    h("div", { class: "bx-stat-value", text: fmtMoney(amount) }));
+}
+
+function heroActual() {
+    const { amount, pace } = paceInfo();
+    const spent = totalSpent();
+    const remaining = amount - spent;
+    let pill = null;
+    if (amount > 0 && periodOffset <= 0) {
+        pill = spent <= pace
+            ? h("span", { class: "bx-pill" }, icon("up", 14), "Pod tempem")
+            : h("span", { class: "bx-pill bx-pill-bad" }, icon("down", 14), "Nad tempem");
+    }
+    const pct = amount > 0 ? Math.min(100, (spent / amount) * 100) : 0;
+    const showMark = amount > 0 && periodOffset <= 0 && pace > 0;
+    return [
+        h("div", { class: "bx-hero-top" },
+            h("div", {},
+                h("div", { class: "bx-hero-label", text: "Zůstatek" }),
+                h("div", { class: "bx-hero-value", text: fmtMoney(remaining) })),
+            pill),
+        h("div", { class: "bx-bar" },
+            h("div", { class: "bx-bar-fill", style: "width:" + pct + "%" }),
+            showMark ? h("div", { class: "bx-bar-mark", style: "left:calc(" + Math.min(100, (pace / amount) * 100) + "% - 1px)" }) : null),
+        h("div", { class: "bx-bar-labels" },
+            h("span", { text: "Utraceno " + fmtPct(amount > 0 ? (spent / amount) * 100 : 0) }),
+            periodOffset <= 0 ? h("span", { text: "Tempo k dnešku " + fmtMoney(Math.round(pace)) }) : null),
+        h("div", { class: "bx-stats" },
+            heroStat(periodOffset === 0 ? "Dnes můžeš" : "Denně", fmtMoney(Math.round(dailyBudget()))),
+            heroStat("Utraceno", fmtMoney(spent)),
+            budgetStat(amount)),
+    ];
+}
+
+function heroPredict() {
+    const amount = budgetData.amount || 0;
+    const planned = totalPredicted();
+    const actual = totalSpent();
+    const free = amount - planned;
+    const diff = actual - planned;
+    const denom = Math.max(amount, planned, actual, 1);
+    let pill = null;
+    if (amount > 0) {
+        pill = free >= 0
+            ? h("span", { class: "bx-pill bx-pill-good-dark", text: "Volné " + fmtMoney(free) })
+            : h("span", { class: "bx-pill bx-pill-bad-dark", text: "Přes plán " + fmtMoney(-free) });
+    }
+    return [
+        h("div", { class: "bx-hero-top" },
+            h("div", {},
+                h("div", { class: "bx-hero-label", text: "Plánováno" }),
+                h("div", { class: "bx-hero-value", text: fmtMoney(planned) }),
+                h("div", { class: "bx-hero-sub", text: "z rozpočtu " + fmtMoney(amount) })),
+            pill),
+        h("div", { class: "bx-bar" },
+            h("div", { class: "bx-bar-fill bx-bar-plan", style: "width:" + (planned / denom) * 100 + "%" }),
+            h("div", { class: "bx-bar-fill", style: "width:" + (actual / denom) * 100 + "%" })),
+        h("div", { class: "bx-legend-dark" },
+            h("span", {}, h("i"), "Skutečné"),
+            h("span", {}, h("i", { class: "plan" }), "Plán " + fmtPct(amount > 0 ? (planned / amount) * 100 : 0))),
+        h("div", { class: "bx-stats" },
+            heroStat("Skutečné", fmtMoney(actual)),
+            heroStat("Odchylka", (diff > 0 ? "+" : "") + fmtMoney(diff)),
+            heroStat("Volné", fmtMoney(free))),
+    ];
+}
+
+function renderHero() {
+    heroEl.className = "bx-hero" + (activeTab === "predict" ? " bx-hero-dark" : "");
+    setChildren(heroEl, ...(activeTab === "actual" ? heroActual() : heroPredict()));
+}
+
+// ----- Kalendář -----
+function buildCalendar(kind, opts = {}) {
+    const today = fmtDate(new Date());
+    const amount = budgetData.amount || 0;
+    const avgDaily = periodDays.length ? amount / periodDays.length : 0;
+    const colorDaily = isCurrentPeriod() ? dailyBudget() : avgDaily;
+
+    const grid = h("div", { class: "bx-cal-grid" });
+    const lead = (periodStart.getDay() + 6) % 7;
+    for (let i = 0; i < lead; i++) grid.append(h("div", { class: "bx-day bx-day-empty", "aria-hidden": "true" }));
+
+    periodDays.forEach((date) => {
+        let cls = "bx-day";
+        let label = "";
+        if (!opts.select) {
+            if (kind === "actual") {
+                const spent = daySpent(date);
+                if (colorDaily > 0) {
+                    if (spent === 0) cls += "";
+                    else if (spent / colorDaily <= 1) cls += " ok";
+                    else if (spent / colorDaily <= 1.5) cls += " warn";
+                    else cls += " over";
+                }
+                if (spent > 0) label = fmtNum(spent) + " Kč";
+            } else {
+                const planned = dayPredicted(date);
+                const actual = daySpent(date);
+                const past = date <= today;
+                if (avgDaily > 0) {
+                    if (past && (planned > 0 || actual > 0)) {
+                        const ref = planned > 0 ? planned : avgDaily;
+                        const r = actual / ref;
+                        cls += r <= 1 ? " ok" : r <= 1.5 ? " warn" : " over";
+                    } else if (!past && planned > 0) {
+                        const r = planned / avgDaily;
+                        cls += r <= 1 ? " ok" : r <= 1.5 ? " warn" : " over";
+                    }
+                }
+                if (past && actual > 0) label = fmtNum(actual) + " Kč";
+                else if (planned > 0) label = "~" + fmtNum(planned) + " Kč";
+            }
+        }
+        const selected = opts.select && opts.select.has(date);
+        if (selected) cls += " sel";
+        if (date === today) cls += " today";
+        const dayNum = parseDate(date).getDate();
+        const cell = h("button", {
+            type: "button", class: cls,
+            "aria-label": dayNum + ". " + (parseDate(date).getMonth() + 1) + ".",
+            "aria-pressed": opts.select ? String(!!selected) : null,
+            onclick: () => (opts.onPick ? opts.onPick(date) : openDaySheet(kind, date)),
+        },
+        h("span", { text: String(dayNum) }),
+        selected ? h("small", {}, icon("check", 10)) : null,
+        label ? h("small", { text: label }) : null,
+        !opts.select && subsOn(date).length > 0 ? h("i", { class: "bx-sub-dot" }) : null);
+        grid.append(cell);
+    });
+
+    return h("div", {},
+        h("div", { class: "bx-cal-names" }, WEEKDAYS_SHORT.map((n) => h("span", { text: n }))),
+        grid);
+}
+
+function renderCalendars() {
+    setChildren(calendarEl, buildCalendar("actual"));
+    setChildren(predictCalendarEl, buildCalendar("predict"));
+    const avg = periodDays.length ? (budgetData.amount || 0) / periodDays.length : 0;
+    predictAvgEl.textContent = avg > 0 ? "Průměr " + fmtMoney(Math.round(avg)) + " / den" : "";
+}
+
+// ----- Karty pod kalendářem -----
+function activeSubs() {
+    const today = fmtDate(new Date());
+    return subs.filter((s) => !s.until || s.until >= today);
+}
+
+function renderSubsCard() {
+    const today = fmtDate(new Date());
+    const active = activeSubs();
+    const total = active.reduce((t, s) => t + s.amount, 0);
+    const upcoming = active
+        .map((s) => ({ s, date: logic.nextPaymentDate(s, today) }))
+        .filter((x) => x.date)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(0, 4);
+
+    setChildren(subsCardEl,
+        h("div", { class: "bx-sub-head" },
+            h("button", {
+                type: "button", class: "bx-sub-toggle", "aria-expanded": String(subsCardOpen),
+                onclick: () => {
+                    subsCardOpen = !subsCardOpen;
+                    try { localStorage.setItem("recept.budget.subsCardOpen", subsCardOpen ? "1" : "0"); } catch { /* ignore */ }
+                    renderSubsCard();
+                },
+            },
+            h("span", { class: "bx-sub-icon" }, icon("repeat", 22)),
+            h("span", { class: "bx-sub-title" },
+                h("strong", { text: "Předplatná" }),
+                h("span", { text: active.length
+                    ? active.length + " " + plural(active.length, "platba", "platby", "plateb") + " · " + fmtMoney(total) + " / měs."
+                    : "Zatím žádné předplatné" })),
+            h("span", { class: "bx-chev" + (subsCardOpen ? " open" : "") }, icon("chev", 22))),
+            h("button", { type: "button", class: "bx-btn bx-btn-soft", text: "Spravovat", onclick: openSubs })),
+        subsCardOpen && upcoming.length ? h("div", { class: "bx-upcoming-label", text: "Nejbližší platby" }) : null,
+        subsCardOpen ? upcoming.map((x) => h("div", { class: "bx-upcoming" },
+            h("span", { class: "d", text: fmtShort(x.date) }),
+            h("span", { class: "n", text: x.s.name }),
+            h("span", { text: fmtMoney(x.s.amount) }))) : null,
+        subsCardOpen && !upcoming.length ? h("p", { class: "bx-hint", text: "Žádné nadcházející platby." }) : null);
+}
+
+function renderBreakdown() {
+    const items = [];
+    const today = fmtDate(new Date());
+    for (const day of periodDays) {
+        for (const e of (budgetData.expenses && budgetData.expenses[day]) || []) items.push(e);
+        for (const sub of subsOn(day)) {
+            if (logic.subCharged(sub, day, today)) items.push({ desc: sub.name, amount: sub.amount });
+        }
+    }
+    const groups = logic.aggregateByDesc(items);
+    const max = groups.length ? groups[0].total || 1 : 1;
+    setChildren(breakdownCardEl,
+        h("div", { class: "bx-card-head" },
+            h("h2", { text: "Podle popisu" }),
+            h("span", { class: "bx-muted", text: groups.length + " " + plural(groups.length, "skupina", "skupiny", "skupin") })),
+        groups.length === 0 ? h("p", { class: "bx-hint", text: "V tomto období zatím nejsou žádné výdaje." }) : null,
+        groups.map((g) => h("div", { class: "bx-group" },
+            h("div", { class: "bx-group-row" },
+                h("span", {}, g.label, g.count > 1 ? h("small", { text: " · " + g.count + "×" }) : null),
+                h("span", { text: fmtMoney(g.total) })),
+            h("div", { class: "bx-group-bar" }, h("div", { style: "width:" + Math.max(2, Math.round((g.total / max) * 100)) + "%" })))));
+}
+
+// ----- Spodní panel (den / šablony) -----
+function closeSheet() {
+    sheet = null;
+    sheetBack = null;
+    editingEntryId = null;
+    render();
+}
+
+function openDaySheet(kind, date) {
+    sheet = { kind, date, mode: "day" };
+    editingEntryId = null;
+    render();
+}
+
+function relDay(date, today) {
+    const diff = Math.round((parseDate(date) - parseDate(today)) / 86400000);
+    let t;
+    if (diff === 0) t = "Dnes";
+    else if (diff === 1) t = "Zítra";
+    else if (diff === -1) t = "Včera";
+    else if (diff > 0) t = "Za " + diff + " " + plural(diff, "den", "dny", "dní");
+    else t = "Před " + -diff + " dny";
+    if (date === fmtDate(periodStart)) t += " · první den období";
+    return t;
+}
+
+function dayLimit(date) {
+    const amount = budgetData.amount || 0;
+    if (!amount || !periodDays.length) return 0;
+    if (isCurrentPeriod() && date >= fmtDate(new Date())) return dailyBudget();
+    return amount / periodDays.length;
+}
+
+function sheetHead(title, sub, onClose) {
+    return h("div", { class: "bx-sheet-head" },
+        h("div", {}, h("h2", { text: title }), sub ? h("p", { text: sub }) : null),
+        h("button", { type: "button", class: "bx-close", "aria-label": "Zavřít", onclick: onClose }, icon("close", 22)));
+}
+
+function weekStrip(date) {
+    const dt = parseDate(date);
+    const start = new Date(dt);
+    start.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        days.push(fmtDate(d));
+    }
+    return h("div", { class: "bx-week" }, days.map((ds, i) => {
+        const inPeriod = periodDays.includes(ds);
+        return h("button", {
+            type: "button", class: ds === date ? "sel" : "", disabled: !inPeriod,
+            onclick: () => { sheet.date = ds; editingEntryId = null; render(); },
+        },
+        h("span", { text: WEEKDAYS_SHORT[i] }),
+        h("b", { text: String(parseDate(ds).getDate()) }),
+        inPeriod && subsOn(ds).length > 0 ? h("i", { class: "bx-sub-dot" }) : null);
+    }));
+}
+
+function infoCard(label, value, cls = "") {
+    return h("div", { class: "bx-info " + cls }, h("small", { text: label }), h("b", { text: value }));
+}
+
+function entryRow(kind, date, entry, ctx) {
+    if (editingEntryId === entry.id) {
+        const amt = h("input", { class: "bx-input", type: "number", inputmode: "numeric", min: "0", step: "1", "data-k": "ea", value: entry.amount, "aria-label": "Částka" });
+        const desc = h("input", { class: "bx-input", type: "text", maxlength: "60", "data-k": "ed", value: entry.desc || "", "aria-label": "Popis" });
+        const save = () => {
+            const v = parseFloat(amt.value);
+            if (!v || v <= 0) { amt.focus(); return; }
+            ctx.update(date, entry.id, v, desc.value.trim());
+        };
+        [amt, desc].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); }));
+        return h("div", { class: "bx-entry bx-entry-edit" },
+            amt, desc,
+            h("button", { type: "button", class: "bx-btn bx-btn-primary", "aria-label": "Uložit", onclick: save }, icon("check", 20)),
+            h("button", { type: "button", class: "bx-btn", "aria-label": "Zrušit úpravu", onclick: () => { editingEntryId = null; render(); } }, icon("close", 20)));
+    }
+    let extra = null;
+    if (kind === "predict") {
+        extra = entry.done
+            ? h("span", { class: "bx-tag", text: "✓ převedeno" })
+            : h("button", { type: "button", class: "bx-mini", text: "→ výdaj", title: "Převést na skutečný výdaj", onclick: () => ctx.complete(date, entry) });
+    }
+    return h("div", { class: "bx-entry" },
+        h("span", { class: "n", text: entry.desc || "Bez popisu" }),
+        extra,
+        h("span", { class: "a", text: fmtMoney(entry.amount) }),
+        h("button", { type: "button", class: "bx-icon-sm", "aria-label": "Upravit", onclick: () => { editingEntryId = entry.id; render(); } }, icon("pencil", 18)),
+        h("button", { type: "button", class: "bx-icon-sm danger", "aria-label": "Smazat", onclick: () => ctx.remove(date, entry.id) }, icon("trash", 18)));
+}
+
+function daySheet() {
+    const { kind, date } = sheet;
+    const ctx = ctxFor(kind);
+    const today = fmtDate(new Date());
+    const dt = parseDate(date);
+    const amount = budgetData.amount || 0;
+    const avg = periodDays.length ? amount / periodDays.length : 0;
+    const entries = ctx.entries(date);
+
+    let info;
+    if (kind === "actual") {
+        if (!amount) {
+            info = [infoCard("Denní limit", "Nenastaven"), infoCard("Utraceno", fmtMoney(daySpent(date)))];
+        } else {
+            const limit = dayLimit(date);
+            const left = limit - daySpent(date);
+            info = [
+                infoCard("Denní limit", fmtMoney(Math.round(limit))),
+                left >= 0 ? infoCard("Ještě můžeš", fmtMoney(Math.round(left)), "good") : infoCard("Přes limit", fmtMoney(Math.round(-left)), "bad"),
+            ];
+        }
+    } else {
+        info = [infoCard("Průměr / den", fmtMoney(Math.round(avg))), infoCard("Plán dne", fmtMoney(dayPredicted(date)))];
+    }
+
+    const subCards = subsOn(date).map((sub) => {
+        const charged = logic.subCharged(sub, date, today);
+        const manual = sub.paid && Object.prototype.hasOwnProperty.call(sub.paid, date);
+        return h("div", { class: "bx-subcard" },
+            h("div", { class: "bx-subcard-top" },
+                h("span", { class: "bx-sub-icon" }, icon("repeat", 20)),
+                h("div", {}, h("small", { text: "Předplatné" }), h("strong", { text: sub.name })),
+                h("span", { class: "amt", text: fmtMoney(sub.amount) })),
+            kind === "actual"
+                ? h("div", { class: "bx-switch-row" },
+                    h("div", {}, h("b", { text: "Zaplaceno" }), h("small", { text: manual ? "Nastaveno ručně" : "Automaticky: strhne se v den platby" })),
+                    h("button", {
+                        type: "button", class: "bx-switch", role: "switch", "aria-checked": String(charged), "aria-label": "Zaplaceno",
+                        onclick: () => { if (!sub.paid) sub.paid = {}; sub.paid[date] = !charged; subsChanged(); },
+                    }))
+                : h("div", { class: "bx-switch-row" }, h("small", { text: "Do plánu se platba počítá vždy." })));
+    });
+
+    const submit = () => {
+        const v = parseFloat(entryDraft.amount);
+        if (!v || v <= 0) { document.querySelector('[data-k="amount"]')?.focus(); return; }
+        const desc = entryDraft.desc.trim();
+        entryDraft = { amount: "", desc: "" };
+        ctx.add(date, v, desc);
+    };
+    const onKey = (e) => { if (e.key === "Enter") submit(); };
+    const amtInput = h("input", {
+        class: "bx-input", type: "number", inputmode: "numeric", min: "0", step: "1", placeholder: "0",
+        "data-k": "amount", id: "f-amount", value: entryDraft.amount, onkeydown: onKey,
+        oninput: (e) => { entryDraft.amount = e.target.value; },
+    });
+    const descInput = h("input", {
+        class: "bx-input", type: "text", maxlength: "60", placeholder: "Např. oběd",
+        "data-k": "desc", id: "f-desc", value: entryDraft.desc, onkeydown: onKey,
+        oninput: (e) => { entryDraft.desc = e.target.value; },
+    });
+
+    const chips = h("div", { class: "bx-chips" },
+        "Šablony:",
+        templates.slice(0, 3).map((t) => h("button", {
+            type: "button", class: "bx-chip", text: (t.name || "Šablona") + " · " + fmtMoney(t.amount),
+            onclick: () => ctx.add(date, t.amount, t.name || ""),
+        })),
+        h("button", {
+            type: "button", class: "bx-chip bx-chip-new", text: "+ Nová",
+            onclick: () => {
+                sheetBack = { kind, date, mode: "day" };
+                tplDraft = { id: null, name: "", amount: "" };
+                sheet = { kind, mode: "tplform" };
+                render();
+            },
+        }));
+
+    const total = entries.reduce((t, e) => t + (e.amount || 0), 0);
+    const list = entries.length
+        ? [
+            h("div", { class: "bx-list-head" }, "Položky dne", h("span", { text: "Celkem " + fmtMoney(total) })),
+            entries.map((e) => entryRow(kind, date, e, ctx)),
+            kind === "predict" && entries.some((e) => !e.done)
+                ? h("button", { type: "button", class: "bx-btn bx-btn-wide", style: "margin-top:0.8rem", text: "Převést vše na výdaje", onclick: () => ctx.completeAll(date) })
+                : null,
+        ]
+        : h("div", { class: "bx-empty" },
+            h("b", { text: kind === "actual" ? "Zatím žádné výdaje" : "Zatím žádný plán" }),
+            h("span", { text: kind === "actual" ? "Výdaje, které přidáš, se objeví tady." : "Položky, které přidáš, se objeví tady." }));
+
+    return [
+        sheetHead(WEEKDAYS_FULL[dt.getDay()] + " " + dt.getDate() + ". " + MONTHS_GEN[dt.getMonth()], relDay(date, today), closeSheet),
+        weekStrip(date),
+        h("div", { class: "bx-info-row" }, info),
+        subCards,
+        h("div", { class: "bx-form-grid" },
+            h("div", { class: "bx-field" }, h("label", { for: "f-amount", text: "Částka" }), h("div", { class: "bx-input-wrap" }, amtInput, h("span", { text: "Kč" }))),
+            h("div", { class: "bx-field" }, h("label", { for: "f-desc", text: "Popis" }), descInput)),
+        chips,
+        h("button", { type: "button", class: "bx-submit", text: kind === "actual" ? "Přidat výdaj" : "Přidat do plánu", onclick: submit }),
+        list,
+    ];
+}
+
+function leaveTplForm() {
+    if (sheetBack) {
+        sheet = sheetBack;
+        sheetBack = null;
+    } else {
+        sheet = { kind: sheet.kind, mode: "templates" };
+    }
+    render();
+}
+
+function templatesSheet() {
+    const kind = sheet.kind;
+    return [
+        sheetHead("Šablony", "Klepnutím spustíš hromadné přidání", closeSheet),
+        templates.length === 0
+            ? h("div", { class: "bx-empty" }, h("b", { text: "Zatím žádné šablony" }), h("span", { text: "Šablona je předvyplněný výdaj, který půjde snadno přidat." }))
+            : templates.map((t) => h("div", { class: "bx-tpl-row" },
+                h("button", { type: "button", class: "use", onclick: () => startBulk(kind, t) },
+                    h("span", { text: t.name || "Bez názvu" }), h("span", { text: fmtMoney(t.amount) })),
+                h("button", {
+                    type: "button", class: "bx-icon-sm", "aria-label": "Upravit šablonu",
+                    onclick: () => { tplDraft = { id: t.id, name: t.name || "", amount: String(t.amount) }; sheetBack = null; sheet = { kind, mode: "tplform" }; render(); },
+                }, icon("pencil", 18)),
+                h("button", {
+                    type: "button", class: "bx-icon-sm danger", "aria-label": "Smazat šablonu",
+                    onclick: () => { templates = templates.filter((x) => x.id !== t.id); persistTemplates(); render(); },
+                }, icon("trash", 18)))),
+        h("button", {
+            type: "button", class: "bx-btn bx-btn-wide", style: "margin-top:1rem",
+            onclick: () => { tplDraft = { id: null, name: "", amount: "" }; sheetBack = null; sheet = { kind, mode: "tplform" }; render(); },
+        }, icon("plus", 18), "Nová šablona"),
+    ];
+}
+
+function tplFormSheet() {
+    const save = () => {
+        const v = parseFloat(tplDraft.amount);
+        if (!v || v <= 0) { document.querySelector('[data-k="tamount"]')?.focus(); return; }
+        const name = tplDraft.name.trim();
+        if (tplDraft.id) {
+            const t = templates.find((x) => x.id === tplDraft.id);
+            if (t) { t.name = name; t.amount = v; }
+        } else {
+            templates.push({ id: genId(), name, amount: v });
+        }
+        persistTemplates();
+        leaveTplForm();
+    };
+    const onKey = (e) => { if (e.key === "Enter") save(); };
+    return [
+        sheetHead(tplDraft.id ? "Upravit šablonu" : "Nová šablona", "Předvyplněný výdaj pro rychlé přidání", leaveTplForm),
+        h("div", { class: "bx-field", style: "margin-bottom:0.7rem" },
+            h("label", { for: "f-tname", text: "Název" }),
+            h("input", { class: "bx-input", id: "f-tname", type: "text", maxlength: "60", placeholder: "Např. Snídaně", "data-k": "tname", value: tplDraft.name, onkeydown: onKey, oninput: (e) => { tplDraft.name = e.target.value; } })),
+        h("div", { class: "bx-field", style: "margin-bottom:1rem" },
+            h("label", { for: "f-tamount", text: "Částka" }),
+            h("div", { class: "bx-input-wrap" },
+                h("input", { class: "bx-input", id: "f-tamount", type: "number", inputmode: "numeric", min: "0", step: "1", placeholder: "0", "data-k": "tamount", value: tplDraft.amount, onkeydown: onKey, oninput: (e) => { tplDraft.amount = e.target.value; } }),
+                h("span", { text: "Kč" }))),
+        h("button", { type: "button", class: "bx-submit", text: "Uložit šablonu", onclick: save }),
+    ];
+}
+
+function renderSheet() {
+    if (sheet && sheet.mode === "day" && !periodDays.includes(sheet.date)) sheet = null;
+    if (!sheet) {
+        sheetBackdropEl.classList.add("hidden");
+        return;
+    }
+    const top = sheetEl.scrollTop;
+    const nodes = sheet.mode === "day" ? daySheet() : sheet.mode === "templates" ? templatesSheet() : tplFormSheet();
+    setChildren(sheetEl, ...nodes.flat(Infinity).filter(Boolean));
+    sheetBackdropEl.classList.remove("hidden");
+    sheetEl.scrollTop = top;
+}
+
+// ----- Celoobrazovkové pohledy (historie = tlačítko Zpět funguje) -----
+function pushView(name) {
+    try { history.pushState({ bx: name }, ""); } catch { /* ignore */ }
+}
+
+function closeViews() {
+    if (history.state && history.state.bx) {
+        history.back();
+    } else {
+        bulk = null;
+        subsOpen = false;
+        subDraft = null;
+        render();
+    }
+}
+
+window.addEventListener("popstate", () => {
+    if (bulk || subsOpen) {
+        bulk = null;
+        subsOpen = false;
+        subDraft = null;
+        subDeleteAsk = false;
+        render();
+    }
+});
+
+// ----- Hromadné přidání -----
+function startBulk(kind, preset) {
+    sheet = null;
+    sheetBack = null;
+    bulk = preset
+        ? { kind, step: 2, amount: preset.amount, desc: preset.name || "", days: new Set() }
+        : { kind, step: 1, amount: 0, desc: "", days: new Set() };
+    bulkDraft = preset ? { amount: String(preset.amount), desc: preset.name || "" } : { amount: "", desc: "" };
+    pushView("bulk");
+    render();
+}
+
+function bulkGoNext() {
+    const v = parseFloat(bulkDraft.amount);
+    if (!v || v <= 0) { document.querySelector('[data-k="bamount"]')?.focus(); return; }
+    bulk.amount = v;
+    bulk.desc = bulkDraft.desc.trim();
+    bulk.step = 2;
+    render();
+    viewBulkEl.scrollTop = 0;
+}
+
+function applyBulk() {
+    if (!bulk || bulk.days.size === 0) return;
+    const { kind, amount, desc } = bulk;
+    const ctxData = kind === "actual" ? null : predictData;
+    for (const d of bulk.days) {
+        if (kind === "actual") {
+            if (!budgetData.expenses) budgetData.expenses = {};
+            if (!Array.isArray(budgetData.expenses[d])) budgetData.expenses[d] = [];
+            budgetData.expenses[d].push({ id: genId(), amount, desc });
+        } else {
+            if (!Array.isArray(ctxData[d])) ctxData[d] = [];
+            ctxData[d].push({ id: genId(), amount, desc });
+        }
+    }
+    if (kind === "actual") debouncedSave();
+    else debouncedPredictSave();
+    bulk = null;
+    render();
+    closeViews();
+}
+
+function stepNode(num, label, state) {
+    return h("div", { class: "bx-step " + state },
+        h("i", {}, state === "done" ? icon("check", 16) : String(num)),
+        h("span", { text: label }));
+}
+
+function renderBulk() {
+    if (!bulk) {
+        viewBulkEl.classList.add("hidden");
+        return;
+    }
+    const wasHidden = viewBulkEl.classList.contains("hidden");
+    const top = viewBulkEl.scrollTop;
+    viewBulkEl.classList.remove("hidden");
+
+    const header = h("div", { class: "bx-view-head" },
+        h("h2", { text: "Hromadné přidání" }),
+        h("button", { type: "button", class: "bx-link", text: "Zrušit", onclick: closeViews }));
+    const steps = h("div", { class: "bx-steps" },
+        stepNode(1, "Částka a popis", bulk.step === 1 ? "now" : "done"),
+        stepNode(2, "Vyber dny", bulk.step === 2 ? "now" : ""));
+
+    const nodes = [header, steps];
+    if (bulk.step === 1) {
+        const onKey = (e) => { if (e.key === "Enter") bulkGoNext(); };
+        nodes.push(h("section", { class: "bx-card bx-form-card" },
+            h("div", { class: "bx-form-grid" },
+                h("div", { class: "bx-field" },
+                    h("label", { for: "b-amount", text: "Částka" }),
+                    h("div", { class: "bx-input-wrap" },
+                        h("input", { class: "bx-input", id: "b-amount", type: "number", inputmode: "numeric", min: "0", step: "1", placeholder: "0", "data-k": "bamount", value: bulkDraft.amount, onkeydown: onKey, oninput: (e) => { bulkDraft.amount = e.target.value; } }),
+                        h("span", { text: "Kč" }))),
+                h("div", { class: "bx-field" },
+                    h("label", { for: "b-desc", text: "Popis" }),
+                    h("input", { class: "bx-input", id: "b-desc", type: "text", maxlength: "60", placeholder: "Např. snídaně", "data-k": "bdesc", value: bulkDraft.desc, onkeydown: onKey, oninput: (e) => { bulkDraft.desc = e.target.value; } }))),
+            templates.length
+                ? h("div", { class: "bx-chips" }, "Šablony:", templates.slice(0, 4).map((t) => h("button", {
+                    type: "button", class: "bx-chip", text: (t.name || "Šablona") + " · " + fmtMoney(t.amount),
+                    onclick: () => { bulkDraft = { amount: String(t.amount), desc: t.name || "" }; render(); },
+                })))
+                : null,
+            h("button", { type: "button", class: "bx-submit", text: "Dál – vybrat dny", onclick: bulkGoNext })));
+    } else {
+        const count = bulk.days.size;
+        nodes.push(
+            h("div", { class: "bx-summary" },
+                h("div", {}, h("small", { text: "Na každý vybraný den" }), h("strong", { text: (bulk.desc ? bulk.desc + " · " : "") + fmtMoney(bulk.amount) })),
+                h("button", { type: "button", class: "bx-btn bx-btn-soft", text: "Upravit", onclick: () => { bulk.step = 1; bulkDraft = { amount: String(bulk.amount), desc: bulk.desc }; render(); } })),
+            h("section", { class: "bx-card" },
+                h("div", { class: "bx-card-head" }, h("strong", { text: fmtRange().replace(/ \d{4}$/, "") }), h("span", { class: "bx-muted", text: "Klepnutím vybereš den" })),
+                buildCalendar(bulk.kind, {
+                    select: bulk.days,
+                    onPick: (d) => { if (bulk.days.has(d)) bulk.days.delete(d); else bulk.days.add(d); render(); },
+                })));
+        nodes.push(h("div", { class: "bx-bottom-bar" },
+            h("div", { class: "bx-bottom-bar-inner" },
+                h("div", {},
+                    h("small", { text: count === 0 ? "Vyber alespoň 1 den" : "Vybráno " + count + " " + plural(count, "den", "dny", "dnů") }),
+                    h("strong", { text: fmtMoney(bulk.amount * count) })),
+                h("button", { type: "button", class: "bx-btn bx-btn-primary", text: "Přidat", disabled: count === 0, onclick: applyBulk })))); 
+    }
+    const inner = h("div", { class: "bx-view-inner" }, nodes.filter((n) => !n.classList.contains("bx-bottom-bar")));
+    const bar = nodes.find((n) => n.classList.contains("bx-bottom-bar"));
+    setChildren(viewBulkEl, inner);
+    if (bar) viewBulkEl.append(bar);
+    viewBulkEl.scrollTop = wasHidden ? 0 : top;
+}
+
+// ----- Správa předplatných -----
+function newSubDraft() {
+    return { id: null, name: "", amount: "", day: "", since: currentPeriodStart(), until: "", error: "" };
+}
+
+function openSubs() {
+    subsOpen = true;
+    subDraft = newSubDraft();
+    subDeleteAsk = false;
+    pushView("subs");
+    render();
+    viewSubsEl.scrollTop = 0;
+}
+
+function subsChanged() {
+    persistSubs();
+    render();
+}
+
+function fmtLong(dateStr) {
+    const d = parseDate(dateStr);
+    return d.getDate() + ". " + (d.getMonth() + 1) + ". " + d.getFullYear();
+}
+
+function saveSub() {
+    const name = subDraft.name.trim();
+    const amount = parseFloat(subDraft.amount);
+    const day = parseInt(subDraft.day, 10);
+    let error = "";
+    if (!name) error = "Zadej název předplatného.";
+    else if (!amount || amount <= 0) error = "Zadej částku větší než 0.";
+    else if (!day || day < 1 || day > 31) error = "Den v měsíci musí být 1–31.";
+    else if (subDraft.until && subDraft.until < (subDraft.since || "")) error = "Datum Do nesmí být před datem Od.";
+    if (error) {
+        subDraft.error = error;
+        render();
+        return;
+    }
+    const since = subDraft.since || currentPeriodStart();
+    if (subDraft.id) {
+        const s = subs.find((x) => x.id === subDraft.id);
+        if (s) {
+            s.name = name; s.amount = amount; s.day = day; s.since = since;
+            if (subDraft.until) s.until = subDraft.until; else delete s.until;
+        }
+    } else {
+        subs.push({ id: genId(), name, amount, day, since, ...(subDraft.until ? { until: subDraft.until } : {}) });
+    }
+    subDraft = newSubDraft();
+    subDeleteAsk = false;
+    subsChanged();
+}
+
+function deleteSub() {
+    subs = subs.filter((s) => s.id !== subDraft.id);
+    subDraft = newSubDraft();
+    subDeleteAsk = false;
+    subsChanged();
+}
+
+function renderSubsView() {
+    if (!subsOpen) {
+        viewSubsEl.classList.add("hidden");
+        return;
+    }
+    const wasHidden = viewSubsEl.classList.contains("hidden");
+    const top = viewSubsEl.scrollTop;
+    viewSubsEl.classList.remove("hidden");
+
+    const today = fmtDate(new Date());
+    const active = activeSubs();
+    const total = active.reduce((t, s) => t + s.amount, 0);
+    const amount = budgetData.amount || 0;
+    const sorted = [...subs].sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, "cs"));
+    const editing = !!subDraft.id;
+
+    const field = (label, key, props, wrapKc) => {
+        const input = h("input", Object.assign({
+            class: "bx-input", id: "s-" + key, "data-k": "s" + key, value: subDraft[key],
+            oninput: (e) => { subDraft[key] = e.target.value; },
+            onkeydown: (e) => { if (e.key === "Enter") saveSub(); },
+        }, props));
+        return h("div", { class: "bx-field" }, h("label", { for: "s-" + key, text: label }), wrapKc ? h("div", { class: "bx-input-wrap" }, input, h("span", { text: "Kč" })) : input);
+    };
+
+    const form = h("section", { class: "bx-card bx-form-card", id: "sub-form" },
+        h("h3", { text: editing ? "Upravit předplatné" : "Nové předplatné" }),
+        field("Název", "name", { type: "text", maxlength: "40", placeholder: "Např. Netflix" }),
+        h("div", { class: "bx-form-two" },
+            field("Částka", "amount", { type: "number", inputmode: "numeric", min: "0", step: "1", placeholder: "0" }, true),
+            field("Den v měsíci", "day", { type: "number", inputmode: "numeric", min: "1", max: "31", step: "1", placeholder: "1–31" })),
+        h("div", { class: "bx-form-two" },
+            field("Od", "since", { type: "date" }),
+            field("Do (nepovinné)", "until", { type: "date" })),
+        h("p", { class: "bx-hint", text: "Pokud měsíc nemá zvolený den, platba se strhne poslední den měsíce. Pro ukončení se zachováním historie nastav datum Do." }),
+        subDraft.error ? h("p", { class: "bx-hint", style: "color:#b3261e;font-weight:700", role: "alert", text: subDraft.error }) : null,
+        h("button", { type: "button", class: "bx-submit", text: editing ? "Uložit změny" : "Přidat předplatné", onclick: saveSub }),
+        editing
+            ? h("div", { class: "bx-form-actions" },
+                h("button", { type: "button", class: "bx-btn", text: "Zrušit úpravu", onclick: () => { subDraft = newSubDraft(); subDeleteAsk = false; render(); } }),
+                subDeleteAsk
+                    ? h("div", { class: "bx-danger-box" },
+                        h("p", { text: "Smazáním se předplatné odstraní i z historie předchozích měsíců. Opravdu smazat?" }),
+                        h("div", { class: "bx-confirm-actions" },
+                            h("button", { type: "button", class: "bx-btn bx-btn-primary", text: "Smazat", onclick: deleteSub }),
+                            h("button", { type: "button", class: "bx-btn", text: "Ponechat", onclick: () => { subDeleteAsk = false; render(); } })))
+                    : h("button", { type: "button", class: "bx-btn bx-btn-danger", onclick: () => { subDeleteAsk = true; render(); } }, icon("trash", 18), "Smazat předplatné"))
+            : null);
+
+    const list = sorted.length
+        ? h("section", { class: "bx-card" }, sorted.map((s) => {
+            const next = logic.nextPaymentDate(s, today);
+            return h("div", { class: "bx-sub-row" },
+                h("span", { class: "bx-day-badge", text: s.day + "." }),
+                h("div", { class: "t" },
+                    h("strong", { text: s.name }),
+                    h("small", { text: (next ? "Další platba " + fmtShort(next) : "Bez další platby") + " · od " + fmtLong(s.since) + (s.until ? " · do " + fmtLong(s.until) : "") })),
+                h("span", { class: "amt", text: fmtMoney(s.amount) }),
+                h("button", {
+                    type: "button", class: "bx-icon-sm", "aria-label": "Upravit " + s.name,
+                    onclick: () => {
+                        subDraft = { id: s.id, name: s.name, amount: String(s.amount), day: String(s.day), since: s.since, until: s.until || "", error: "" };
+                        subDeleteAsk = false;
+                        render();
+                        $("sub-form").scrollIntoView({ behavior: "smooth", block: "start" });
+                    },
+                }, icon("pencil", 20)));
+        }))
+        : null;
+
+    setChildren(viewSubsEl, h("div", { class: "bx-view-inner" },
+        h("div", { class: "bx-view-head" },
+            h("button", { type: "button", class: "back", "aria-label": "Zpět", onclick: closeViews }, icon("left", 24), h("h2", { text: "Předplatná" }))),
+        h("div", { class: "bx-total-card" },
+            h("div", {}, h("small", { text: "Měsíčně celkem" }), h("strong", { text: fmtMoney(total) })),
+            h("span", { text: active.length + " " + plural(active.length, "aktivní", "aktivní", "aktivních") + (amount > 0 && total > 0 ? " · " + fmtPct((total / amount) * 100) + " rozpočtu" : "") })),
+        list,
+        form));
+    viewSubsEl.scrollTop = wasHidden ? 0 : top;
+}
+
+// ----- Události -----
+function showNewMonthConfirm() {
+    periodMenuOpen = false;
+    updatePeriodMenu();
+    newMonthConfirmEl.classList.remove("hidden");
+}
+
+function switchTab(tab) {
+    activeTab = tab;
+    sheet = null;
+    sheetBack = null;
+    editingEntryId = null;
+    tabActual.classList.toggle("active", tab === "actual");
+    tabPredict.classList.toggle("active", tab === "predict");
+    tabActual.setAttribute("aria-selected", String(tab === "actual"));
+    tabPredict.setAttribute("aria-selected", String(tab === "predict"));
+    panelActual.classList.toggle("hidden", tab !== "actual");
+    panelPredict.classList.toggle("hidden", tab !== "predict");
+    render();
+}
+
 prevBtn.addEventListener("click", () => goToPeriod(periodOffset - 1));
 nextBtn.addEventListener("click", () => goToPeriod(periodOffset + 1));
+periodLabelBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    periodMenuOpen = !periodMenuOpen;
+    updatePeriodMenu();
+});
 todayBtn.addEventListener("click", () => goToPeriod(0));
 newMonthBtn.addEventListener("click", showNewMonthConfirm);
-newMonthYesBtn.addEventListener("click", startNewMonth);
-newMonthNoBtn.addEventListener("click", hideNewMonthConfirm);
+$("newmonth-yes").addEventListener("click", startNewMonth);
+$("newmonth-no").addEventListener("click", hideNewMonthConfirm);
 tabActual.addEventListener("click", () => switchTab("actual"));
 tabPredict.addEventListener("click", () => switchTab("predict"));
-document.getElementById("tpl-btn-actual").addEventListener("click", (e) => { e.stopPropagation(); toggleTplMenu("actual"); });
-document.getElementById("tpl-btn-predict").addEventListener("click", (e) => { e.stopPropagation(); toggleTplMenu("predict"); });
-document.getElementById("bulk-btn-actual").addEventListener("click", (e) => { e.stopPropagation(); startBulk("actual"); });
-document.getElementById("bulk-btn-predict").addEventListener("click", (e) => { e.stopPropagation(); startBulk("predict"); });
+quickAddBtn.addEventListener("click", () => { if (budgetData) openDaySheet("actual", fmtDate(new Date())); });
+for (const kind of ["actual", "predict"]) {
+    $("tpl-btn-" + kind).addEventListener("click", () => { if (budgetData) { sheet = { kind, mode: "templates" }; render(); } });
+    $("bulk-btn-" + kind).addEventListener("click", () => { if (budgetData) startBulk(kind); });
+}
+sheetBackdropEl.addEventListener("click", (e) => { if (e.target === sheetBackdropEl) closeSheet(); });
+document.addEventListener("click", (e) => {
+    if (periodMenuOpen && !periodMenuEl.contains(e.target) && !periodLabelBtn.contains(e.target)) {
+        periodMenuOpen = false;
+        updatePeriodMenu();
+    }
+});
+document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (periodMenuOpen) { periodMenuOpen = false; updatePeriodMenu(); }
+    else if (sheet) closeSheet();
+});
+
+prevBtn.append(icon("left", 22));
+nextBtn.append(icon("right", 22));
+quickAddBtn.append(icon("plus", 18), "Výdaj dnes");
+for (const kind of ["actual", "predict"]) {
+    $("tpl-btn-" + kind).append(icon("layers", 18), "Šablony");
+    $("bulk-btn-" + kind).append(icon("calcheck", 18), "Hromadně");
+}
+$("copy-prev-btn").append(icon("copy", 18), "Převzít plán z minulého období");
+$("export-csv").append(icon("download", 18), "CSV období");
+$("export-json").append(icon("download", 18), "Záloha (JSON)");
 
 // ----- Inicializace -----
 customStarts = loadCustomStartsLocal();
 subs = loadSubsLocal();
 templates = loadTemplatesLocal();
 computePeriod(0);
-subsSinceEl.value = currentPeriodStart();
-renderSubs();
-updateNewMonthBtn();
 updateNavBtns();
+renderPeriod();
 
 initNavigation("rozpocet", async (user) => {
     currentUser = user;
     if (user) {
         await withTimeout(loadCustomStartsFirestore(), 8000);
         computePeriod(periodOffset);
-        updateNewMonthBtn();
         updateNavBtns();
         Promise.all([loadSubsFirestore(), loadTemplatesFirestore()]).then(() => {
-            renderSubs();
-            renderTplMenus();
             if (budgetData) render();
         });
     }

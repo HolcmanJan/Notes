@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
     fmtDate, buildBoundaries, findCurrentIndex, migrateEntries, subsOn,
-    subCharged, aggregateByDesc, buildCsv, mapPredictionsToPeriod,
+    subCharged, aggregateByDesc, buildCsv, mapPredictionsToPeriod, nextPaymentDate,
 } from "../budget-logic.js";
 
 let n = 0;
@@ -84,4 +84,12 @@ test("převzetí plánu mapuje podle čísla dne", () => {
     assert.equal(map["2026-10-15"][0].amount, 100);
     assert.equal(map["2026-10-15"][0].done, undefined);
     assert.equal(map["2026-11-13"][0].desc, "b");
+});
+
+test("nejbližší platba předplatného", () => {
+    const sub = { id: "a", name: "N", amount: 1, day: 5, since: "2026-01-01" };
+    assert.equal(nextPaymentDate(sub, "2026-10-14"), "2026-11-05");
+    assert.equal(nextPaymentDate(sub, "2026-11-05"), "2026-11-05");
+    assert.equal(nextPaymentDate({ ...sub, until: "2026-10-31" }, "2026-10-14"), null);
+    assert.equal(nextPaymentDate({ ...sub, since: "2027-01-01" }, "2026-10-14"), "2027-01-05");
 });

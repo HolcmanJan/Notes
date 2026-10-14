@@ -39,22 +39,6 @@
             </div>
         </section>
 
-        <!-- Předplatná -->
-        <details class="subs-box" id="subs-box">
-            <summary id="subs-summary">Předplatná</summary>
-            <div class="subs-body">
-                <p class="budget-modal-hint">Opakující se měsíční platby. Automaticky se propisují do výdajů (od data platby) i do predikce každého měsíce.</p>
-                <div id="subs-list"></div>
-                <div class="subs-form">
-                    <input type="text" id="subs-name" class="budget-entry-desc" placeholder="Název (např. Netflix)" maxlength="40">
-                    <input type="number" id="subs-amount" class="budget-entry-amt" placeholder="Kč" min="0" step="1" inputmode="numeric">
-                    <input type="number" id="subs-day" class="budget-entry-amt" placeholder="Den" min="1" max="31" step="1" inputmode="numeric" aria-label="Den v měsíci">
-                    <label class="subs-since-label">Od <input type="date" id="subs-since" class="budget-entry-desc"></label>
-                    <button type="button" id="subs-add" class="budget-entry-add">Přidat</button>
-                </div>
-            </div>
-        </details>
-
         <!-- Záložky -->
         <div class="budget-tabs" role="tablist">
             <button type="button" class="budget-tab active" id="tab-actual" role="tab" aria-selected="true" aria-controls="panel-actual">Přehled</button>
@@ -66,7 +50,7 @@
             <!-- Souhrn -->
             <section class="budget-summary" id="budget-summary">
                 <div class="budget-stat">
-                    <span class="budget-stat-label">Celkový rozpočet</span>
+                    <span class="budget-stat-label">Rozpočet</span>
                     <span class="budget-stat-value" id="stat-total">0 Kč</span>
                 </div>
                 <div class="budget-stat">
@@ -81,12 +65,34 @@
                     </span>
                 </div>
                 <div class="budget-stat">
-                    <span class="budget-stat-label">Denní budget</span>
+                    <span class="budget-stat-label">Denně</span>
                     <span class="budget-stat-value" id="stat-daily">0 Kč</span>
                 </div>
             </section>
 
-            <button type="button" class="bulk-btn" id="bulk-btn-actual">Hromadné přidání</button>
+            <!-- Předplatná -->
+            <details class="subs-box" id="subs-box">
+                <summary id="subs-summary">Předplatná</summary>
+                <div class="subs-body">
+                    <p class="budget-modal-hint">Opakující se měsíční platby. Automaticky se propisují do výdajů (od data platby) i do predikce každého měsíce.</p>
+                    <div id="subs-list"></div>
+                    <div class="subs-form">
+                        <input type="text" id="subs-name" class="budget-entry-desc" placeholder="Název (např. Netflix)" maxlength="40">
+                        <input type="number" id="subs-amount" class="budget-entry-amt" placeholder="Kč" min="0" step="1" inputmode="numeric">
+                        <input type="number" id="subs-day" class="budget-entry-amt" placeholder="Den" min="1" max="31" step="1" inputmode="numeric" aria-label="Den v měsíci">
+                        <label class="subs-since-label">Od <input type="date" id="subs-since" class="budget-entry-desc"></label>
+                        <button type="button" id="subs-add" class="budget-entry-add">Přidat</button>
+                    </div>
+                </div>
+            </details>
+
+            <div class="budget-toolbar">
+                <div class="tpl-wrap">
+                    <button type="button" class="bulk-btn" id="tpl-btn-actual">Šablony ▾</button>
+                    <div class="tpl-menu hidden" id="tpl-menu-actual"></div>
+                </div>
+                <button type="button" class="bulk-btn" id="bulk-btn-actual">Hromadné přidání</button>
+            </div>
 
             <!-- Kalendář skutečnosti -->
             <section class="budget-calendar" id="budget-calendar"></section>
@@ -109,12 +115,18 @@
                     <span class="budget-stat-value" id="pred-stat-diff">0 Kč</span>
                 </div>
                 <div class="budget-stat">
-                    <span class="budget-stat-label">Zbývá naplánovat</span>
+                    <span class="budget-stat-label">Volné</span>
                     <span class="budget-stat-value" id="pred-stat-unplanned">0 Kč</span>
                 </div>
             </section>
 
-            <button type="button" class="bulk-btn" id="bulk-btn-predict">Hromadné přidání</button>
+            <div class="budget-toolbar">
+                <div class="tpl-wrap">
+                    <button type="button" class="bulk-btn" id="tpl-btn-predict">Šablony ▾</button>
+                    <div class="tpl-menu hidden" id="tpl-menu-predict"></div>
+                </div>
+                <button type="button" class="bulk-btn" id="bulk-btn-predict">Hromadné přidání</button>
+            </div>
 
             <!-- Predikční kalendář -->
             <section class="budget-calendar" id="predict-calendar"></section>

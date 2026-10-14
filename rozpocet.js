@@ -390,8 +390,14 @@ function totalPredicted() {
 }
 
 // ----- Záložky -----
+function placeSubsBox() {
+    const target = document.getElementById(activeTab === "actual" ? "budget-summary" : "predict-summary");
+    target.after(document.getElementById("subs-box"));
+}
+
 function switchTab(tab) {
     activeTab = tab;
+    placeSubsBox();
     bulk = null;
     openDay = null;
     openPredictDay = null;
@@ -905,6 +911,9 @@ function closeAllPopups() {
     const hadDay = openDay !== null;
     const hadPredict = openPredictDay !== null;
     const hadBulkForm = bulk && bulk.step === "form";
+    tplMenuKind = null;
+    tplFormKind = null;
+    renderTplMenus();
     openDay = null;
     openPredictDay = null;
     editingEntryId = null;
@@ -925,7 +934,8 @@ document.body.appendChild(modalHost);
 
 function syncModal() {
     let card = null;
-    if (bulk && bulk.step === "form") card = createBulkForm();
+    if (tplFormKind) card = createTemplateForm();
+    else if (bulk && bulk.step === "form") card = createBulkForm();
     else if (!bulk && activeTab === "actual" && openDay) card = createBubble(openDay, expenseCtx);
     else if (!bulk && activeTab === "predict" && openPredictDay) card = createBubble(openPredictDay, predictCtx);
 
@@ -987,11 +997,16 @@ function onDayClick(kind, dateStr) {
     }
 }
 
-function startBulk(kind) {
+function startBulk(kind, preset) {
     openDay = null;
     openPredictDay = null;
     editingEntryId = null;
-    bulk = { kind, step: "form", amount: 0, desc: "", days: new Set() };
+    tplMenuKind = null;
+    tplFormKind = null;
+    bulk = preset
+        ? { kind, step: "select", amount: preset.amount, desc: preset.name, days: new Set() }
+        : { kind, step: "form", amount: 0, desc: "", days: new Set() };
+    renderTplMenus();
     renderCalendar();
     renderPredictCalendar();
     renderBulkBar();
@@ -1452,6 +1467,169 @@ subsAddBtn.addEventListener("click", addSubscription);
 [subsNameEl, subsAmountEl, subsDayEl].forEach((el) =>
     el.addEventListener("keydown", (e) => { if (e.key === "Enter") addSubscription(); }));
 
+// ----- Šablony útrat -----
+const TPL_KEY = "recept.budget.templates.v1";
+let templates = []; // [{ id, name, amount }]
+let tplMenuKind = null;
+let tplFormKind = null;
+
+function loadTemplatesLocal() {
+    try {
+        const a = JSON.parse(localStorage.getItem(TPL_KEY) || "[]");
+        return Array.isArray(a) ? a : [];
+    } catch { return []; }
+}
+
+async function loadTemplatesFirestore() {
+    if (!currentUser) return;
+    try {
+        const snap = await getDoc(doc(db, "users", currentUser.uid, "budget", "_templates"));
+        if (snap.exists() && Array.isArray(snap.data().templates)) {
+            templates = snap.data().templates;
+            localStorage.setItem(TPL_KEY, JSON.stringify(templates));
+        }
+    } catch (err) { console.error("Failed to load templates:", err); }
+}
+
+async function persistTemplates() {
+    localStorage.setItem(TPL_KEY, JSON.stringify(templates));
+    if (currentUser) {
+        try {
+            await setDoc(doc(db, "users", currentUser.uid, "budget", "_templates"), { templates });
+        } catch (err) { console.error("Failed to save templates:", err); }
+    }
+}
+
+function renderTplMenus() {
+    ["actual", "predict"].forEach((kind) => {
+        const menu = document.getElementById("tpl-menu-" + kind);
+        menu.replaceChildren();
+        menu.classList.toggle("hidden", tplMenuKind !== kind);
+        if (tplMenuKind !== kind) return;
+
+        if (templates.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "budget-modal-hint";
+            empty.textContent = "Zatím žádné šablony.";
+            menu.appendChild(empty);
+        }
+        templates.forEach((t) => {
+            const item = document.createElement("div");
+            item.className = "tpl-item";
+
+            const use = document.createElement("button");
+            use.type = "button";
+            use.className = "tpl-use";
+            use.textContent = (t.name ? t.name + " – " : "") + fmtMoney(t.amount);
+            use.addEventListener("click", (e) => { e.stopPropagation(); startBulk(kind, t); });
+
+            const del = document.createElement("button");
+            del.type = "button";
+            del.className = "budget-entry-del";
+            del.textContent = "✕";
+            del.setAttribute("aria-label", "Smazat šablonu");
+            del.addEventListener("click", (e) => {
+                e.stopPropagation();
+                templates = templates.filter((x) => x.id !== t.id);
+                persistTemplates();
+                renderTplMenus();
+            });
+
+            item.appendChild(use);
+            item.appendChild(del);
+            menu.appendChild(item);
+        });
+
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "tpl-new";
+        add.textContent = "＋ Nová šablona";
+        add.addEventListener("click", (e) => {
+            e.stopPropagation();
+            tplFormKind = kind;
+            tplMenuKind = null;
+            renderTplMenus();
+            syncModal();
+        });
+        menu.appendChild(add);
+        menu.addEventListener("click", (e) => e.stopPropagation());
+    });
+}
+
+function toggleTplMenu(kind) {
+    const open = tplMenuKind === kind;
+    closeAllPopups();
+    tplMenuKind = open ? null : kind;
+    renderTplMenus();
+}
+
+function createTemplateForm() {
+    const kind = tplFormKind;
+    const card = document.createElement("div");
+    card.className = "budget-modal-card";
+
+    const head = document.createElement("div");
+    head.className = "budget-modal-head";
+    const title = document.createElement("strong");
+    title.textContent = "Nová šablona";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "budget-entry-del";
+    closeBtn.textContent = "✕";
+    closeBtn.setAttribute("aria-label", "Zavřít");
+    closeBtn.addEventListener("click", closeAllPopups);
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+    card.appendChild(head);
+
+    const form = document.createElement("div");
+    form.className = "budget-entry-form";
+
+    const amt = document.createElement("input");
+    amt.type = "number";
+    amt.className = "budget-entry-amt";
+    amt.placeholder = "Kč";
+    amt.min = "0";
+    amt.step = "1";
+    amt.inputMode = "numeric";
+
+    const name = document.createElement("input");
+    name.type = "text";
+    name.className = "budget-entry-desc";
+    name.placeholder = "Název / popis…";
+    name.maxLength = 60;
+
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "budget-entry-add";
+    save.textContent = "Uložit";
+
+    const doSave = (e) => {
+        e.stopPropagation();
+        const v = parseFloat(amt.value);
+        if (!v || v <= 0) { amt.focus(); return; }
+        templates.push({ id: genId(), name: name.value.trim(), amount: v });
+        persistTemplates();
+        tplFormKind = null;
+        tplMenuKind = kind;
+        renderTplMenus();
+        syncModal();
+    };
+    save.addEventListener("click", doSave);
+    [amt, name].forEach((inp) => {
+        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doSave(e); });
+        inp.addEventListener("click", (e) => e.stopPropagation());
+    });
+
+    form.appendChild(amt);
+    form.appendChild(name);
+    form.appendChild(save);
+    card.appendChild(form);
+
+    card.addEventListener("click", (e) => e.stopPropagation());
+    return card;
+}
+
 // ----- Event listeners -----
 amountEl.addEventListener("input", onBudgetAmountChange);
 prevBtn.addEventListener("click", () => goToPeriod(periodOffset - 1));
@@ -1462,12 +1640,15 @@ newMonthYesBtn.addEventListener("click", startNewMonth);
 newMonthNoBtn.addEventListener("click", hideNewMonthConfirm);
 tabActual.addEventListener("click", () => switchTab("actual"));
 tabPredict.addEventListener("click", () => switchTab("predict"));
+document.getElementById("tpl-btn-actual").addEventListener("click", (e) => { e.stopPropagation(); toggleTplMenu("actual"); });
+document.getElementById("tpl-btn-predict").addEventListener("click", (e) => { e.stopPropagation(); toggleTplMenu("predict"); });
 document.getElementById("bulk-btn-actual").addEventListener("click", (e) => { e.stopPropagation(); startBulk("actual"); });
 document.getElementById("bulk-btn-predict").addEventListener("click", (e) => { e.stopPropagation(); startBulk("predict"); });
 
 // ----- Inicializace -----
 customStarts = loadCustomStartsLocal();
 subs = loadSubsLocal();
+templates = loadTemplatesLocal();
 computePeriod(0);
 subsSinceEl.value = currentPeriodStart();
 renderSubs();
@@ -1479,6 +1660,7 @@ initNavigation("rozpocet", async (user) => {
     if (user) {
         await loadCustomStartsFirestore();
         await loadSubsFirestore();
+        await loadTemplatesFirestore();
         renderSubs();
         computePeriod(periodOffset);
         updateNewMonthBtn();

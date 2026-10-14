@@ -3971,3 +3971,13 @@ body.bulk-active {
 @keyframes budget-spin {
     to { transform: rotate(360deg); }
 }
+
+/* Popup dne nepřekrývá kalendář – ostatní dny zůstávají klikatelné */
+.budget-modal-backdrop.budget-modal-passthrough {
+    background: transparent;
+    pointer-events: none;
+}
+
+.budget-modal-backdrop.budget-modal-passthrough .budget-modal-card {
+    pointer-events: auto;
+}

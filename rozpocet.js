@@ -948,6 +948,7 @@ function closeAllPopups() {
     const hadBulkForm = bulk && bulk.step === "form";
     tplMenuKind = null;
     tplFormKind = null;
+    tplEditId = null;
     renderTplMenus();
     openDay = null;
     openPredictDay = null;
@@ -979,6 +980,8 @@ function syncModal() {
         setChildren(modalHost);
         return;
     }
+    const isDayPopup = !tplFormKind && !bulk;
+    modalHost.classList.toggle("budget-modal-passthrough", isDayPopup);
     const saved = keepModalInputs ? captureModalInputs() : null;
     setChildren(modalHost, card);
     modalHost.classList.remove("hidden");
@@ -1508,6 +1511,7 @@ const TPL_KEY = "recept.budget.templates.v1";
 let templates = []; // [{ id, name, amount }]
 let tplMenuKind = null;
 let tplFormKind = null;
+let tplEditId = null;
 
 function loadTemplatesLocal() {
     try {
@@ -1559,6 +1563,20 @@ function renderTplMenus() {
             use.textContent = (t.name ? t.name + " – " : "") + fmtMoney(t.amount);
             use.addEventListener("click", (e) => { e.stopPropagation(); startBulk(kind, t); });
 
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "budget-entry-del budget-entry-edit";
+            edit.textContent = "✎";
+            edit.setAttribute("aria-label", "Upravit šablonu");
+            edit.addEventListener("click", (e) => {
+                e.stopPropagation();
+                tplEditId = t.id;
+                tplFormKind = kind;
+                tplMenuKind = null;
+                renderTplMenus();
+                syncModal();
+            });
+
             const del = document.createElement("button");
             del.type = "button";
             del.className = "budget-entry-del";
@@ -1572,6 +1590,7 @@ function renderTplMenus() {
             });
 
             item.appendChild(use);
+            item.appendChild(edit);
             item.appendChild(del);
             menu.appendChild(item);
         });
@@ -1582,6 +1601,7 @@ function renderTplMenus() {
         add.textContent = "＋ Nová šablona";
         add.addEventListener("click", (e) => {
             e.stopPropagation();
+            tplEditId = null;
             tplFormKind = kind;
             tplMenuKind = null;
             renderTplMenus();
@@ -1601,13 +1621,14 @@ function toggleTplMenu(kind) {
 
 function createTemplateForm() {
     const kind = tplFormKind;
+    const editing = tplEditId ? templates.find((t) => t.id === tplEditId) : null;
     const card = document.createElement("div");
     card.className = "budget-modal-card";
 
     const head = document.createElement("div");
     head.className = "budget-modal-head";
     const title = document.createElement("strong");
-    title.textContent = "Nová šablona";
+    title.textContent = editing ? "Upravit šablonu" : "Nová šablona";
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "budget-entry-del";
@@ -1634,6 +1655,10 @@ function createTemplateForm() {
     name.className = "budget-entry-desc";
     name.placeholder = "Název / popis…";
     name.maxLength = 60;
+    if (editing) {
+        amt.value = editing.amount;
+        name.value = editing.name || "";
+    }
 
     const save = document.createElement("button");
     save.type = "button";
@@ -1644,8 +1669,14 @@ function createTemplateForm() {
         e.stopPropagation();
         const v = parseFloat(amt.value);
         if (!v || v <= 0) { amt.focus(); return; }
-        templates.push({ id: genId(), name: name.value.trim(), amount: v });
+        if (editing) {
+            editing.name = name.value.trim();
+            editing.amount = v;
+        } else {
+            templates.push({ id: genId(), name: name.value.trim(), amount: v });
+        }
         persistTemplates();
+        tplEditId = null;
         tplFormKind = null;
         tplMenuKind = kind;
         renderTplMenus();

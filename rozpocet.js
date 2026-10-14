@@ -61,6 +61,7 @@ const ICONS = {
     check: '<path d="m5 12 5 5 9-10"/>',
     up: '<path d="M12 19V5m-6 6 6-6 6 6"/>',
     down: '<path d="M12 5v14m-6-6 6 6 6-6"/>',
+    chev: '<path d="m6 9 6 6 6-6"/>',
 };
 
 function icon(name, size = 20) {
@@ -144,6 +145,8 @@ let subDraft = null;         // { id?, name, amount, day, since, until }
 let subDeleteAsk = false;
 let editingBudget = false;
 let periodMenuOpen = false;
+let subsCardOpen = false;
+try { subsCardOpen = localStorage.getItem("recept.budget.subsCardOpen") === "1"; } catch { /* ignore */ }
 
 // ----- DOM -----
 const $ = (id) => document.getElementById(id);
@@ -1080,18 +1083,28 @@ function renderSubsCard() {
 
     setChildren(subsCardEl,
         h("div", { class: "bx-sub-head" },
+            h("button", {
+                type: "button", class: "bx-sub-toggle", "aria-expanded": String(subsCardOpen),
+                onclick: () => {
+                    subsCardOpen = !subsCardOpen;
+                    try { localStorage.setItem("recept.budget.subsCardOpen", subsCardOpen ? "1" : "0"); } catch { /* ignore */ }
+                    renderSubsCard();
+                },
+            },
             h("span", { class: "bx-sub-icon" }, icon("repeat", 22)),
-            h("div", { class: "bx-sub-title" },
+            h("span", { class: "bx-sub-title" },
                 h("strong", { text: "Předplatná" }),
                 h("span", { text: active.length
                     ? active.length + " " + plural(active.length, "platba", "platby", "plateb") + " · " + fmtMoney(total) + " / měs."
                     : "Zatím žádné předplatné" })),
+            h("span", { class: "bx-chev" + (subsCardOpen ? " open" : "") }, icon("chev", 22))),
             h("button", { type: "button", class: "bx-btn bx-btn-soft", text: "Spravovat", onclick: openSubs })),
-        upcoming.length ? h("div", { class: "bx-upcoming-label", text: "Nejbližší platby" }) : null,
-        upcoming.map((x) => h("div", { class: "bx-upcoming" },
+        subsCardOpen && upcoming.length ? h("div", { class: "bx-upcoming-label", text: "Nejbližší platby" }) : null,
+        subsCardOpen ? upcoming.map((x) => h("div", { class: "bx-upcoming" },
             h("span", { class: "d", text: fmtShort(x.date) }),
             h("span", { class: "n", text: x.s.name }),
-            h("span", { text: fmtMoney(x.s.amount) }))));
+            h("span", { text: fmtMoney(x.s.amount) }))) : null,
+        subsCardOpen && !upcoming.length ? h("p", { class: "bx-hint", text: "Žádné nadcházející platby." }) : null);
 }
 
 function renderBreakdown() {

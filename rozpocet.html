@@ -39,6 +39,22 @@
             </div>
         </section>
 
+        <!-- Předplatná -->
+        <details class="subs-box" id="subs-box">
+            <summary id="subs-summary">Předplatná</summary>
+            <div class="subs-body">
+                <p class="budget-modal-hint">Opakující se měsíční platby. Automaticky se propisují do výdajů (od data platby) i do predikce každého měsíce.</p>
+                <div id="subs-list"></div>
+                <div class="subs-form">
+                    <input type="text" id="subs-name" class="budget-entry-desc" placeholder="Název (např. Netflix)" maxlength="40">
+                    <input type="number" id="subs-amount" class="budget-entry-amt" placeholder="Kč" min="0" step="1" inputmode="numeric">
+                    <input type="number" id="subs-day" class="budget-entry-amt" placeholder="Den" min="1" max="31" step="1" inputmode="numeric" aria-label="Den v měsíci">
+                    <label class="subs-since-label">Od <input type="date" id="subs-since" class="budget-entry-desc"></label>
+                    <button type="button" id="subs-add" class="budget-entry-add">Přidat</button>
+                </div>
+            </div>
+        </details>
+
         <!-- Záložky -->
         <div class="budget-tabs" role="tablist">
             <button type="button" class="budget-tab active" id="tab-actual" role="tab" aria-selected="true" aria-controls="panel-actual">Přehled</button>

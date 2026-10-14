@@ -3785,3 +3785,58 @@ body.has-bottom-nav {
 body.bulk-active {
     padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
 }
+
+/* ── Předplatná ── */
+.subs-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 1rem;
+    padding: 0.6rem 0.85rem;
+}
+
+.subs-box summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.subs-body {
+    margin-top: 0.6rem;
+}
+
+.subs-body .budget-entry-list,
+#subs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.6rem;
+}
+
+.subs-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.subs-form #subs-name {
+    flex: 1 1 100%;
+}
+
+.subs-since-label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.subs-since-label input {
+    min-width: 0;
+}
+
+.budget-entry-sub {
+    background: #eef2ff;
+    color: #3730a3;
+}

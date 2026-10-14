@@ -206,8 +206,9 @@ function debouncedSave() {
 // ----- Výpočty -----
 function daySpent(dateStr) {
     const entries = budgetData.expenses && budgetData.expenses[dateStr];
-    if (!Array.isArray(entries)) return 0;
-    return entries.reduce((s, e) => s + (e.amount || 0), 0);
+    let sum = Array.isArray(entries) ? entries.reduce((s, e) => s + (e.amount || 0), 0) : 0;
+    if (dateStr <= fmtDate(new Date())) sum += subsSum(dateStr);
+    return sum;
 }
 
 function totalSpent() {
@@ -378,8 +379,8 @@ function debouncedPredictSave() {
 
 function dayPredicted(dateStr) {
     const entries = predictData[dateStr];
-    if (!Array.isArray(entries)) return 0;
-    return entries.reduce((s, e) => s + (e.amount || 0), 0);
+    const sum = Array.isArray(entries) ? entries.reduce((s, e) => s + (e.amount || 0), 0) : 0;
+    return sum + subsSum(dateStr);
 }
 
 function totalPredicted() {
@@ -760,9 +761,20 @@ function createBubble(dateStr, ctx) {
     card.appendChild(form);
 
     const entries = ctx.entries(dateStr);
-    if (entries.length > 0) {
+    const subRows = subsOn(dateStr);
+    if (entries.length > 0 || subRows.length > 0) {
         const list = document.createElement("div");
         list.className = "budget-entry-list";
+        subRows.forEach((sub) => {
+            const row = document.createElement("div");
+            row.className = "budget-entry-row budget-entry-sub";
+            const info = document.createElement("span");
+            info.className = "budget-entry-info";
+            const pending = ctx.title === "Výdaje" && dateStr > fmtDate(new Date());
+            info.textContent = "🔁 " + fmtMoney(sub.amount) + " – " + sub.name + (pending ? " (zatím nezaúčtováno)" : "");
+            row.appendChild(info);
+            list.appendChild(row);
+        });
         entries.forEach((entry) => {
             if (editingEntryId === entry.id) {
                 list.appendChild(createEditRow(dateStr, entry, ctx));
@@ -1257,6 +1269,189 @@ function onBudgetAmountChange() {
     debouncedSave();
 }
 
+// ----- Předplatná (opakující se měsíční platby) -----
+const SUBS_KEY = "recept.budget.subs.v1";
+let subs = []; // [{ id, name, amount, day, since }]
+let editingSubId = null;
+
+const subsSummaryEl = document.getElementById("subs-summary");
+const subsListEl = document.getElementById("subs-list");
+const subsNameEl = document.getElementById("subs-name");
+const subsAmountEl = document.getElementById("subs-amount");
+const subsDayEl = document.getElementById("subs-day");
+const subsSinceEl = document.getElementById("subs-since");
+const subsAddBtn = document.getElementById("subs-add");
+
+function loadSubsLocal() {
+    try {
+        const a = JSON.parse(localStorage.getItem(SUBS_KEY) || "[]");
+        return Array.isArray(a) ? a : [];
+    } catch { return []; }
+}
+
+async function loadSubsFirestore() {
+    if (!currentUser) return;
+    try {
+        const snap = await getDoc(doc(db, "users", currentUser.uid, "budget", "_subs"));
+        if (snap.exists() && Array.isArray(snap.data().subs)) {
+            subs = snap.data().subs;
+            localStorage.setItem(SUBS_KEY, JSON.stringify(subs));
+        }
+    } catch (err) { console.error("Failed to load subscriptions:", err); }
+}
+
+async function persistSubs() {
+    localStorage.setItem(SUBS_KEY, JSON.stringify(subs));
+    if (currentUser) {
+        try {
+            await setDoc(doc(db, "users", currentUser.uid, "budget", "_subs"), { subs });
+        } catch (err) { console.error("Failed to save subscriptions:", err); }
+    }
+}
+
+function subsOn(dateStr) {
+    if (subs.length === 0) return [];
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dim = new Date(y, m, 0).getDate();
+    return subs.filter((s) => dateStr >= s.since && d === Math.min(s.day, dim));
+}
+
+function subsSum(dateStr) {
+    return subsOn(dateStr).reduce((t, s) => t + s.amount, 0);
+}
+
+function currentPeriodStart() {
+    const b = buildBoundaries();
+    return b[findCurrentIndex(b)];
+}
+
+function subsChanged() {
+    persistSubs();
+    renderSubs();
+    if (budgetData) render();
+}
+
+function renderSubs() {
+    const total = subs.reduce((t, s) => t + s.amount, 0);
+    subsSummaryEl.textContent = "Předplatná" + (subs.length ? " · " + subs.length + " · " + fmtMoney(total) + " / měs." : "");
+
+    subsListEl.replaceChildren();
+    subs.forEach((sub) => {
+        if (editingSubId === sub.id) {
+            subsListEl.appendChild(createSubEditRow(sub));
+            return;
+        }
+        const row = document.createElement("div");
+        row.className = "budget-entry-row";
+
+        const info = document.createElement("span");
+        info.className = "budget-entry-info";
+        info.textContent = sub.name + " – " + fmtMoney(sub.amount) + " (" + sub.day + ". v měsíci)";
+
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "budget-entry-del budget-entry-edit";
+        editBtn.textContent = "✎";
+        editBtn.addEventListener("click", () => { editingSubId = sub.id; renderSubs(); });
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "budget-entry-del";
+        delBtn.textContent = "✕";
+        delBtn.addEventListener("click", () => {
+            subs = subs.filter((s) => s.id !== sub.id);
+            subsChanged();
+        });
+
+        row.appendChild(info);
+        row.appendChild(editBtn);
+        row.appendChild(delBtn);
+        subsListEl.appendChild(row);
+    });
+}
+
+function createSubEditRow(sub) {
+    const row = document.createElement("div");
+    row.className = "budget-entry-row budget-entry-editing";
+
+    const name = document.createElement("input");
+    name.type = "text";
+    name.className = "budget-entry-desc";
+    name.maxLength = 40;
+    name.value = sub.name;
+
+    const amt = document.createElement("input");
+    amt.type = "number";
+    amt.className = "budget-entry-amt";
+    amt.min = "0";
+    amt.inputMode = "numeric";
+    amt.value = sub.amount;
+
+    const day = document.createElement("input");
+    day.type = "number";
+    day.className = "budget-entry-amt";
+    day.min = "1";
+    day.max = "31";
+    day.inputMode = "numeric";
+    day.value = sub.day;
+
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "budget-entry-add";
+    save.textContent = "✓";
+    save.addEventListener("click", () => {
+        const a = parseFloat(amt.value);
+        const d = parseInt(day.value, 10);
+        const n = name.value.trim();
+        if (!n) { name.focus(); return; }
+        if (!a || a <= 0) { amt.focus(); return; }
+        if (!d || d < 1 || d > 31) { day.focus(); return; }
+        sub.name = n;
+        sub.amount = a;
+        sub.day = d;
+        editingSubId = null;
+        subsChanged();
+    });
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "budget-entry-cancel";
+    cancel.textContent = "✕";
+    cancel.addEventListener("click", () => { editingSubId = null; renderSubs(); });
+
+    row.appendChild(name);
+    row.appendChild(amt);
+    row.appendChild(day);
+    row.appendChild(save);
+    row.appendChild(cancel);
+    return row;
+}
+
+function addSubscription() {
+    const name = subsNameEl.value.trim();
+    const amount = parseFloat(subsAmountEl.value);
+    const day = parseInt(subsDayEl.value, 10);
+    if (!name) { subsNameEl.focus(); return; }
+    if (!amount || amount <= 0) { subsAmountEl.focus(); return; }
+    if (!day || day < 1 || day > 31) { subsDayEl.focus(); return; }
+    subs.push({
+        id: genId(),
+        name,
+        amount,
+        day,
+        since: subsSinceEl.value || currentPeriodStart(),
+    });
+    subsNameEl.value = "";
+    subsAmountEl.value = "";
+    subsDayEl.value = "";
+    subsSinceEl.value = currentPeriodStart();
+    subsChanged();
+}
+
+subsAddBtn.addEventListener("click", addSubscription);
+[subsNameEl, subsAmountEl, subsDayEl].forEach((el) =>
+    el.addEventListener("keydown", (e) => { if (e.key === "Enter") addSubscription(); }));
+
 // ----- Event listeners -----
 amountEl.addEventListener("input", onBudgetAmountChange);
 prevBtn.addEventListener("click", () => goToPeriod(periodOffset - 1));
@@ -1272,7 +1467,10 @@ document.getElementById("bulk-btn-predict").addEventListener("click", (e) => { e
 
 // ----- Inicializace -----
 customStarts = loadCustomStartsLocal();
+subs = loadSubsLocal();
 computePeriod(0);
+subsSinceEl.value = currentPeriodStart();
+renderSubs();
 updateNewMonthBtn();
 updateNavBtns();
 
@@ -1280,6 +1478,8 @@ initNavigation("rozpocet", async (user) => {
     currentUser = user;
     if (user) {
         await loadCustomStartsFirestore();
+        await loadSubsFirestore();
+        renderSubs();
         computePeriod(periodOffset);
         updateNewMonthBtn();
         updateNavBtns();

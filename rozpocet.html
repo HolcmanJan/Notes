@@ -32,31 +32,66 @@
             </div>
         </section>
 
-        <!-- Souhrn -->
-        <section class="budget-summary" id="budget-summary">
-            <div class="budget-stat">
-                <span class="budget-stat-label">Celkový rozpočet</span>
-                <span class="budget-stat-value" id="stat-total">0 Kč</span>
-            </div>
-            <div class="budget-stat">
-                <span class="budget-stat-label">Utraceno</span>
-                <span class="budget-stat-value" id="stat-spent">0 Kč</span>
-            </div>
-            <div class="budget-stat">
-                <span class="budget-stat-label">Zůstatek</span>
-                <span class="budget-stat-value" id="stat-remaining">
-                    <span id="stat-remaining-value">0 Kč</span>
-                    <span id="stat-remaining-arrow" class="budget-arrow hidden"></span>
-                </span>
-            </div>
-            <div class="budget-stat">
-                <span class="budget-stat-label">Denní budget</span>
-                <span class="budget-stat-value" id="stat-daily">0 Kč</span>
-            </div>
-        </section>
+        <!-- Záložky -->
+        <div class="budget-tabs" role="tablist">
+            <button type="button" class="budget-tab active" id="tab-actual" role="tab" aria-selected="true" aria-controls="panel-actual">Přehled</button>
+            <button type="button" class="budget-tab" id="tab-predict" role="tab" aria-selected="false" aria-controls="panel-predict">Predikce</button>
+        </div>
 
-        <!-- Kalendář -->
-        <section class="budget-calendar" id="budget-calendar"></section>
+        <!-- Panel: Přehled -->
+        <div id="panel-actual" role="tabpanel">
+            <!-- Souhrn -->
+            <section class="budget-summary" id="budget-summary">
+                <div class="budget-stat">
+                    <span class="budget-stat-label">Celkový rozpočet</span>
+                    <span class="budget-stat-value" id="stat-total">0 Kč</span>
+                </div>
+                <div class="budget-stat">
+                    <span class="budget-stat-label">Utraceno</span>
+                    <span class="budget-stat-value" id="stat-spent">0 Kč</span>
+                </div>
+                <div class="budget-stat">
+                    <span class="budget-stat-label">Zůstatek</span>
+                    <span class="budget-stat-value" id="stat-remaining">
+                        <span id="stat-remaining-value">0 Kč</span>
+                        <span id="stat-remaining-arrow" class="budget-arrow hidden"></span>
+                    </span>
+                </div>
+                <div class="budget-stat">
+                    <span class="budget-stat-label">Denní budget</span>
+                    <span class="budget-stat-value" id="stat-daily">0 Kč</span>
+                </div>
+            </section>
+
+            <!-- Kalendář skutečnosti -->
+            <section class="budget-calendar" id="budget-calendar"></section>
+        </div>
+
+        <!-- Panel: Predikce -->
+        <div id="panel-predict" role="tabpanel" class="hidden">
+            <!-- Souhrn predikce -->
+            <section class="budget-summary" id="predict-summary">
+                <div class="budget-stat">
+                    <span class="budget-stat-label">Plánováno</span>
+                    <span class="budget-stat-value" id="pred-stat-planned">0 Kč</span>
+                </div>
+                <div class="budget-stat">
+                    <span class="budget-stat-label">Skutečnost</span>
+                    <span class="budget-stat-value" id="pred-stat-actual">0 Kč</span>
+                </div>
+                <div class="budget-stat">
+                    <span class="budget-stat-label">Odchylka</span>
+                    <span class="budget-stat-value" id="pred-stat-diff">0 Kč</span>
+                </div>
+                <div class="budget-stat">
+                    <span class="budget-stat-label">Zbývá naplánovat</span>
+                    <span class="budget-stat-value" id="pred-stat-unplanned">0 Kč</span>
+                </div>
+            </section>
+
+            <!-- Predikční kalendář -->
+            <section class="budget-calendar" id="predict-calendar"></section>
+        </div>
     </main>
 
     <script type="module" src="rozpocet.js"></script>

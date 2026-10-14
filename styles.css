@@ -3981,3 +3981,20 @@ body.bulk-active {
 .budget-modal-backdrop.budget-modal-passthrough .budget-modal-card {
     pointer-events: auto;
 }
+
+/* Modrá tečka u dnů s platbou předplatného */
+.budget-sub-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #2563eb;
+    box-shadow: 0 0 0 1.5px #fff;
+}
+
+.budget-cal-count {
+    right: auto;
+    left: 3px;
+}

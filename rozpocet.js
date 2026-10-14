@@ -549,6 +549,12 @@ function renderCalendar() {
         numEl.className = "budget-cal-num";
         numEl.textContent = dayNum;
         cell.appendChild(numEl);
+        if (subsOn(dateStr).length > 0) {
+            const dot = document.createElement("span");
+            dot.className = "budget-sub-dot";
+            dot.title = "Předplatné";
+            cell.appendChild(dot);
+        }
 
         if (spent > 0) {
             const spentEl = document.createElement("span");
@@ -671,6 +677,12 @@ function renderPredictCalendar() {
         numEl.className = "budget-cal-num";
         numEl.textContent = dayNum;
         cell.appendChild(numEl);
+        if (subsOn(dateStr).length > 0) {
+            const dot = document.createElement("span");
+            dot.className = "budget-sub-dot";
+            dot.title = "Předplatné";
+            cell.appendChild(dot);
+        }
 
         // Zobraz predikci (a pro minulé dny i skutečnost)
         if (predicted > 0 || (isPast && actual > 0)) {

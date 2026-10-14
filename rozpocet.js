@@ -25,6 +25,7 @@ let periodDays = [];
 let periodOffset = 0; // 0 = aktuální, -1 = předchozí, …
 let openDay = null;
 let openPredictDay = null;
+let editingEntryId = null;
 let activeTab = "actual";
 let customStarts = [];
 
@@ -41,6 +42,9 @@ const statRemainingValueEl = document.getElementById("stat-remaining-value");
 const statRemainingArrowEl = document.getElementById("stat-remaining-arrow");
 const statDailyEl = document.getElementById("stat-daily");
 const newMonthBtn = document.getElementById("new-month-btn");
+const newMonthConfirmEl = document.getElementById("newmonth-confirm");
+const newMonthYesBtn = document.getElementById("newmonth-yes");
+const newMonthNoBtn = document.getElementById("newmonth-no");
 const tabActual = document.getElementById("tab-actual");
 const tabPredict = document.getElementById("tab-predict");
 const panelActual = document.getElementById("panel-actual");
@@ -246,14 +250,29 @@ function expectedRemainingToday() {
 }
 
 // ----- Navigace mezi obdobími -----
+function periodExists(offset) {
+    const b = buildBoundaries();
+    const i = findCurrentIndex(b) + offset;
+    return i >= 0 && i < b.length;
+}
+
+function updateNavBtns() {
+    prevBtn.disabled = !periodExists(periodOffset - 1);
+    nextBtn.disabled = !periodExists(periodOffset + 1);
+}
+
 function goToPeriod(offset) {
+    if (!periodExists(offset)) return;
     periodOffset = offset;
     openDay = null;
     openPredictDay = null;
+    editingEntryId = null;
+    hideNewMonthConfirm();
     computePeriod(periodOffset);
 
     todayBtn.classList.toggle("hidden", isCurrentPeriod());
     updateNewMonthBtn();
+    updateNavBtns();
 
     loadPeriodData();
 }
@@ -482,6 +501,13 @@ function renderCalendar() {
             spentEl.className = "budget-cal-spent";
             spentEl.textContent = fmtMoney(spent);
             cell.appendChild(spentEl);
+            const count = (budgetData.expenses[dateStr] || []).length;
+            if (count > 1) {
+                const badge = document.createElement("span");
+                badge.className = "budget-cal-count";
+                badge.textContent = count + "×";
+                cell.appendChild(badge);
+            }
         }
 
         cell.addEventListener("click", (e) => {
@@ -645,7 +671,7 @@ function createPredictBubble(dateStr) {
 
     const valueEl = document.createElement("span");
     valueEl.className = "budget-bubble-value";
-    valueEl.textContent = dayPredicted(dateStr);
+    valueEl.textContent = fmtMoney(dayPredicted(dateStr));
 
     const plus10 = document.createElement("button");
     plus10.type = "button";
@@ -674,10 +700,49 @@ function createPredictBubble(dateStr) {
 
     row2.appendChild(minus50);
     row2.appendChild(plus50);
+
+    const row3 = document.createElement("div");
+    row3.className = "budget-entry-form";
+
+    const directInput = document.createElement("input");
+    directInput.type = "number";
+    directInput.className = "budget-entry-amt";
+    directInput.placeholder = "Částka";
+    directInput.min = "0";
+    directInput.step = "1";
+    directInput.inputMode = "numeric";
+
+    const setBtn = document.createElement("button");
+    setBtn.type = "button";
+    setBtn.className = "budget-entry-add";
+    setBtn.textContent = "Nastavit";
+
+    const doSet = (e) => {
+        e.stopPropagation();
+        const v = parseFloat(directInput.value);
+        if (isNaN(v) || v < 0) { directInput.focus(); return; }
+        setPrediction(dateStr, v);
+    };
+    setBtn.addEventListener("click", doSet);
+    directInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doSet(e); });
+    directInput.addEventListener("click", (e) => e.stopPropagation());
+
+    row3.appendChild(directInput);
+    row3.appendChild(setBtn);
+
     bubble.appendChild(row1);
     bubble.appendChild(row2);
+    bubble.appendChild(row3);
     bubble.addEventListener("click", (e) => e.stopPropagation());
     return bubble;
+}
+
+function setPrediction(dateStr, value) {
+    if (value === 0) delete predictData[dateStr];
+    else predictData[dateStr] = value;
+    debouncedPredictSave();
+    renderPredictSummary();
+    renderPredictCalendar();
 }
 
 function changePrediction(dateStr, delta) {
@@ -693,6 +758,7 @@ function changePrediction(dateStr, delta) {
 // ----- Inline bublina (+/- ovládání) -----
 function toggleBubble(dateStr) {
     openDay = openDay === dateStr ? null : dateStr;
+    editingEntryId = null;
     renderCalendar();
 }
 
@@ -706,6 +772,10 @@ function createBubble(dateStr) {
         const list = document.createElement("div");
         list.className = "budget-entry-list";
         entries.forEach((entry) => {
+            if (editingEntryId === entry.id) {
+                list.appendChild(createEditRow(dateStr, entry));
+                return;
+            }
             const row = document.createElement("div");
             row.className = "budget-entry-row";
 
@@ -722,7 +792,18 @@ function createBubble(dateStr) {
                 removeEntry(dateStr, entry.id);
             });
 
+            const editBtn = document.createElement("button");
+            editBtn.type = "button";
+            editBtn.className = "budget-entry-del budget-entry-edit";
+            editBtn.textContent = "✎";
+            editBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                editingEntryId = entry.id;
+                renderCalendar();
+            });
+
             row.appendChild(info);
+            row.appendChild(editBtn);
             row.appendChild(delBtn);
             list.appendChild(row);
         });
@@ -773,6 +854,71 @@ function createBubble(dateStr) {
     return bubble;
 }
 
+function createEditRow(dateStr, entry) {
+    const row = document.createElement("div");
+    row.className = "budget-entry-row budget-entry-editing";
+
+    const amt = document.createElement("input");
+    amt.type = "number";
+    amt.className = "budget-entry-amt";
+    amt.min = "0";
+    amt.step = "1";
+    amt.inputMode = "numeric";
+    amt.value = entry.amount;
+
+    const desc = document.createElement("input");
+    desc.type = "text";
+    desc.className = "budget-entry-desc";
+    desc.maxLength = 60;
+    desc.value = entry.desc || "";
+
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "budget-entry-add";
+    save.textContent = "✓";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "budget-entry-cancel";
+    cancel.textContent = "✕";
+
+    const doSave = (e) => {
+        e.stopPropagation();
+        const v = parseFloat(amt.value);
+        if (!v || v <= 0) { amt.focus(); return; }
+        updateEntry(dateStr, entry.id, v, desc.value.trim());
+    };
+    save.addEventListener("click", doSave);
+    cancel.addEventListener("click", (e) => {
+        e.stopPropagation();
+        editingEntryId = null;
+        renderCalendar();
+    });
+    [amt, desc].forEach((inp) => {
+        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doSave(e); });
+        inp.addEventListener("click", (e) => e.stopPropagation());
+    });
+
+    row.appendChild(amt);
+    row.appendChild(desc);
+    row.appendChild(save);
+    row.appendChild(cancel);
+    return row;
+}
+
+function updateEntry(dateStr, entryId, amount, desc) {
+    const list = budgetData.expenses && budgetData.expenses[dateStr];
+    if (!Array.isArray(list)) return;
+    const entry = list.find((e) => e.id === entryId);
+    if (!entry) return;
+    entry.amount = amount;
+    entry.desc = desc;
+    editingEntryId = null;
+    debouncedSave();
+    renderSummary();
+    renderCalendar();
+}
+
 function addEntry(dateStr, amount, desc) {
     if (!budgetData.expenses) budgetData.expenses = {};
     if (!Array.isArray(budgetData.expenses[dateStr])) budgetData.expenses[dateStr] = [];
@@ -794,6 +940,7 @@ function removeEntry(dateStr, entryId) {
 document.addEventListener("click", () => {
     if (openDay !== null) {
         openDay = null;
+        editingEntryId = null;
         renderCalendar();
     }
     if (openPredictDay !== null) {
@@ -838,10 +985,18 @@ async function persistCustomStarts() {
     }
 }
 
+function hideNewMonthConfirm() {
+    newMonthConfirmEl.classList.add("hidden");
+}
+
+function showNewMonthConfirm() {
+    newMonthConfirmEl.classList.remove("hidden");
+}
+
 async function startNewMonth() {
+    hideNewMonthConfirm();
     const today = fmtDate(new Date());
     if (today === fmtDate(periodStart)) return;
-    if (!confirm("Ukončit aktuální období a začít nové od dneška?\n\nVýdaje od dneška budou přesunuty do nového období.")) return;
 
     const expensesToMove = {};
     const oldBudgetAmount = budgetData.amount || 0;
@@ -905,7 +1060,9 @@ amountEl.addEventListener("input", onBudgetAmountChange);
 prevBtn.addEventListener("click", () => goToPeriod(periodOffset - 1));
 nextBtn.addEventListener("click", () => goToPeriod(periodOffset + 1));
 todayBtn.addEventListener("click", () => goToPeriod(0));
-newMonthBtn.addEventListener("click", startNewMonth);
+newMonthBtn.addEventListener("click", showNewMonthConfirm);
+newMonthYesBtn.addEventListener("click", startNewMonth);
+newMonthNoBtn.addEventListener("click", hideNewMonthConfirm);
 tabActual.addEventListener("click", () => switchTab("actual"));
 tabPredict.addEventListener("click", () => switchTab("predict"));
 
@@ -913,6 +1070,7 @@ tabPredict.addEventListener("click", () => switchTab("predict"));
 customStarts = loadCustomStartsLocal();
 computePeriod(0);
 updateNewMonthBtn();
+updateNavBtns();
 
 initNavigation("rozpocet", async (user) => {
     currentUser = user;
@@ -920,6 +1078,7 @@ initNavigation("rozpocet", async (user) => {
         await loadCustomStartsFirestore();
         computePeriod(periodOffset);
         updateNewMonthBtn();
+        updateNavBtns();
     }
     loadPeriodData();
 });

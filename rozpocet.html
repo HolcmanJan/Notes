@@ -23,6 +23,13 @@
             </div>
             <button type="button" id="period-today" class="budget-today-btn hidden">Aktuální období</button>
             <button type="button" id="new-month-btn" class="budget-newmonth-btn hidden">Nový měsíc</button>
+            <div class="budget-confirm hidden" id="newmonth-confirm">
+                <span>Ukončit aktuální období a začít nové od dneška? Výdaje od dneška se přesunou do nového období.</span>
+                <div class="budget-confirm-actions">
+                    <button type="button" id="newmonth-yes" class="budget-entry-add">Ano, začít</button>
+                    <button type="button" id="newmonth-no" class="budget-entry-cancel">Zrušit</button>
+                </div>
+            </div>
             <div class="budget-input-row">
                 <label for="budget-amount">Rozpočet na období:</label>
                 <div class="budget-input-wrap">

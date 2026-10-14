@@ -284,6 +284,19 @@ function updateNewMonthBtn() {
     newMonthBtn.classList.toggle("hidden", !isCurrentPeriod() || isFirst);
 }
 
+function showCalendarLoading() {
+    for (const el of [calendarEl, predictCalendarEl]) {
+        const wrap = document.createElement("div");
+        wrap.className = "budget-loading";
+        wrap.setAttribute("role", "status");
+        wrap.setAttribute("aria-label", "Načítání");
+        const spinner = document.createElement("div");
+        spinner.className = "budget-spinner";
+        wrap.appendChild(spinner);
+        el.replaceChildren(wrap);
+    }
+}
+
 function loadPeriodData() {
     // Zruš předchozí Firestore listener
     if (unsubscribeBudget) {
@@ -295,6 +308,7 @@ function loadPeriodData() {
     loadPredictForPeriod();
 
     if (currentUser) {
+        showCalendarLoading();
         // Načti predikce z Firestore
         const predRef = doc(db, "users", currentUser.uid, "budget", predictKey());
         getDoc(predRef).then((snap) => {
@@ -1278,6 +1292,7 @@ async function startNewMonth() {
 
 // ----- Změna rozpočtu -----
 function onBudgetAmountChange() {
+    if (!budgetData) return;
     budgetData.amount = parseFloat(amountEl.value) || 0;
     renderSummary();
     renderCalendar();

@@ -8,9 +8,30 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { initNavigation } from "./navigation.js";
 
+const REQUIRED_IDS = ["bulk-bar", "subs-box", "tpl-btn-actual", "tpl-btn-predict", "bulk-btn-actual", "bulk-btn-predict", "newmonth-confirm"];
+if (REQUIRED_IDS.some((id) => !document.getElementById(id))) {
+    try {
+        if (!sessionStorage.getItem("rozpocet.reloaded")) {
+            sessionStorage.setItem("rozpocet.reloaded", "1");
+            location.reload();
+        }
+    } catch { /* ignore */ }
+    throw new Error("Zastaralá verze stránky – obnov ji (Ctrl+F5).");
+}
+try { sessionStorage.removeItem("rozpocet.reloaded"); } catch { /* ignore */ }
+
 const STORAGE_KEY = "recept.budget.v1";
 const CUSTOM_STARTS_KEY = "recept.budget.customStarts";
 const PREDICT_STORAGE_KEY = "recept.budget.predict.v1";
+
+function setChildren(el, ...nodes) {
+    el.textContent = "";
+    nodes.forEach((n) => el.appendChild(n));
+}
+
+function withTimeout(promise, ms) {
+    return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+}
 
 // ----- Stav -----
 let currentUser = null;
@@ -293,7 +314,7 @@ function showCalendarLoading() {
         const spinner = document.createElement("div");
         spinner.className = "budget-spinner";
         wrap.appendChild(spinner);
-        el.replaceChildren(wrap);
+        setChildren(el, wrap);
     }
 }
 
@@ -955,11 +976,11 @@ function syncModal() {
 
     if (!card) {
         modalHost.classList.add("hidden");
-        modalHost.replaceChildren();
+        setChildren(modalHost);
         return;
     }
     const saved = keepModalInputs ? captureModalInputs() : null;
-    modalHost.replaceChildren(card);
+    setChildren(modalHost, card);
     modalHost.classList.remove("hidden");
     if (saved) restoreModalInputs(saved);
 }
@@ -1118,7 +1139,7 @@ function createBulkForm() {
 function renderBulkBar() {
     if (!bulk || bulk.step !== "select") {
         bulkBarEl.classList.add("hidden");
-        bulkBarEl.replaceChildren();
+        setChildren(bulkBarEl);
         document.body.classList.remove("bulk-active");
         return;
     }
@@ -1161,7 +1182,7 @@ function renderBulkBar() {
     actions.appendChild(edit);
     actions.appendChild(cancel);
 
-    bulkBarEl.replaceChildren(info, actions);
+    setChildren(bulkBarEl, info, actions);
     bulkBarEl.classList.remove("hidden");
     document.body.classList.add("bulk-active");
 }
@@ -1365,7 +1386,7 @@ function renderSubs() {
     const total = subs.reduce((t, s) => t + s.amount, 0);
     subsSummaryEl.textContent = "Předplatná" + (subs.length ? " · " + subs.length + " · " + fmtMoney(total) + " / měs." : "");
 
-    subsListEl.replaceChildren();
+    setChildren(subsListEl);
     [...subs].sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, "cs")).forEach((sub) => {
         if (editingSubId === sub.id) {
             subsListEl.appendChild(createSubEditRow(sub));
@@ -1518,7 +1539,7 @@ async function persistTemplates() {
 function renderTplMenus() {
     ["actual", "predict"].forEach((kind) => {
         const menu = document.getElementById("tpl-menu-" + kind);
-        menu.replaceChildren();
+        setChildren(menu);
         menu.classList.toggle("hidden", tplMenuKind !== kind);
         if (tplMenuKind !== kind) return;
 
@@ -1673,13 +1694,15 @@ updateNavBtns();
 initNavigation("rozpocet", async (user) => {
     currentUser = user;
     if (user) {
-        await loadCustomStartsFirestore();
-        await loadSubsFirestore();
-        await loadTemplatesFirestore();
-        renderSubs();
+        await withTimeout(loadCustomStartsFirestore(), 8000);
         computePeriod(periodOffset);
         updateNewMonthBtn();
         updateNavBtns();
+        Promise.all([loadSubsFirestore(), loadTemplatesFirestore()]).then(() => {
+            renderSubs();
+            renderTplMenus();
+            if (budgetData) render();
+        });
     }
     loadPeriodData();
 });

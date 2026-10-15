@@ -3,8 +3,10 @@ import {
     doc,
     setDoc,
     onSnapshot,
+    deleteField,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { initNavigation } from "./navigation.js?v=6200029e";
+import { diffDoc, mapDeletes, listToMap, mapToList } from "./sync-logic.js?v=68881def";
 
 const STORAGE_KEY = "recept.palivo.v1";
 
@@ -43,13 +45,41 @@ function saveLocal() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
-async function persist() {
+// Ve Firestore jsou osoby, jejich záznamy a jízdy uložené jako mapy podle id, aby šlo slučovat
+// změny z více zařízení po jednotlivých položkách místo přepsání celého dokumentu.
+function toCloudShape(d) {
+    return {
+        consumption: d.consumption || 0,
+        pricePerLiter: d.pricePerLiter || 0,
+        people: listToMap((d.people || []).map((p) => ({ ...p, entries: listToMap(p.entries) }))),
+        trips: listToMap(d.trips),
+    };
+}
+
+function fromCloudShape(d) {
+    return {
+        people: mapToList(d.people).map((p) => ({ ...p, entries: mapToList(p.entries) })),
+        trips: mapToList(d.trips),
+    };
+}
+
+let cloudBase = null; // poslední stav dokumentu ze serveru (v cloudovém tvaru)
+
+function persist() {
     if (!data) return;
     if (currentUser) {
-        try {
-            const ref = doc(db, "users", currentUser.uid, "palivo", "data");
-            await setDoc(ref, data);
-        } catch (e) { console.error(e); }
+        const ref = doc(db, "users", currentUser.uid, "palivo", "data");
+        const next = toCloudShape(data);
+        let write = null;
+        if (cloudBase) {
+            const patch = diffDoc(cloudBase, next);
+            if (patch) write = setDoc(ref, mapDeletes(patch, deleteField()), { merge: true });
+        } else {
+            write = setDoc(ref, next);
+        }
+        cloudBase = JSON.parse(JSON.stringify(next));
+        // Bez await: offline se zápis potvrdí až po připojení, data jsou mezitím v lokální cache.
+        if (write) write.catch((e) => console.error(e));
     }
     saveLocal();
 }
@@ -57,21 +87,37 @@ async function persist() {
 let saveTimeout = null;
 function debouncedSave() {
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => persist(), 400);
+    saveTimeout = setTimeout(flushSave, 400);
 }
+
+function flushSave() {
+    if (!saveTimeout) return;
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+    persist();
+}
+
+// Při zavření nebo přepnutí aplikace ulož hned – jinak by se poslední změna v 400ms okně ztratila.
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushSave();
+});
+window.addEventListener("pagehide", flushSave);
 
 function loadData() {
     if (unsubData) { unsubData(); unsubData = null; }
+    cloudBase = null;
 
     if (currentUser) {
         const ref = doc(db, "users", currentUser.uid, "palivo", "data");
         unsubData = onSnapshot(ref, (snap) => {
             if (snap.exists()) {
                 const d = snap.data();
+                cloudBase = JSON.parse(JSON.stringify(d));
+                const lists = fromCloudShape(d);
                 data.consumption = d.consumption || data.consumption || 0;
                 data.pricePerLiter = d.pricePerLiter || data.pricePerLiter || 0;
-                data.people = Array.isArray(d.people) ? d.people : data.people;
-                data.trips = Array.isArray(d.trips) ? d.trips : data.trips;
+                data.people = d.people ? lists.people : data.people;
+                data.trips = d.trips ? lists.trips : data.trips;
             }
             applyDataToInputs();
             renderPeople();

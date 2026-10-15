@@ -285,7 +285,15 @@ function loadLocalStats() {
 }
 
 function saveLocalStats(stats) {
-    localStorage.setItem(STATS_LOCAL, JSON.stringify(stats));
+    try {
+        localStorage.setItem(STATS_LOCAL, JSON.stringify(stats));
+        return true;
+    } catch (err) {
+        // Nejčastěji plné úložiště prohlížeče (cca 5 MB) kvůli obrázkům cviků
+        console.error(err);
+        alert("Úložiště prohlížeče je plné, změnu nelze uložit. Smaž některé obrázky cviků nebo se přihlas.");
+        return false;
+    }
 }
 
 // ===== Vlastní cviky =====
@@ -461,8 +469,10 @@ function renderHistory() {
             const li = document.createElement("li");
             const setCount = (ex.sets || []).length;
             const vol = (ex.sets || []).reduce((s, x) => s + (x.weight || 0) * (x.reps || 0), 0);
-            li.innerHTML = "<span>" + info.icon + " " + info.name + "</span>" +
-                "<span>" + setCount + " × · " + fmtKg(Math.round(vol)) + "</span>";
+            li.append(
+                textSpan(null, info.icon + " " + info.name),
+                textSpan(null, setCount + " × · " + fmtKg(Math.round(vol)))
+            );
             list.appendChild(li);
         }
         card.appendChild(list);
@@ -782,9 +792,10 @@ function openFinishModal() {
         const setCount = ex.sets.length;
         const vol = ex.sets.reduce((s, x) => s + (x.weight || 0) * (x.reps || 0), 0);
         const best = ex.sets.reduce((m, x) => Math.max(m, x.weight || 0), 0);
-        row.innerHTML =
-            '<span class="finish-row-name">' + info.icon + " " + info.name + "</span>" +
-            '<span class="finish-row-stats">' + setCount + " setů · max " + fmtKg(best) + " · " + fmtKg(Math.round(vol)) + "</span>";
+        row.append(
+            textSpan("finish-row-name", info.icon + " " + info.name),
+            textSpan("finish-row-stats", setCount + " setů · max " + fmtKg(best) + " · " + fmtKg(Math.round(vol)))
+        );
         finishSummaryEl.appendChild(row);
     }
 
@@ -827,13 +838,25 @@ async function confirmFinish() {
     showView("home");
 }
 
+// Název a ikona vlastního cviku jsou text od uživatele – nikdy je nevkládat jako HTML.
+function textSpan(className, text) {
+    const span = document.createElement("span");
+    if (className) span.className = className;
+    span.textContent = text;
+    return span;
+}
+
 // ===== Ukládání: workout / template / stats =====
 async function saveWorkout(workout) {
     if (currentUser) {
-        await setDoc(
+        // Bez await: offline by se slib splnil až po připojení a dokončení tréninku by viselo.
+        setDoc(
             doc(db, "users", currentUser.uid, "workouts", workout.id),
             workout
-        );
+        ).catch((err) => {
+            console.error(err);
+            alert("Trénink se nepodařilo uložit do cloudu: " + err.message);
+        });
     } else {
         const all = loadLocalArray(HISTORY_LOCAL);
         all.unshift(workout);
@@ -1269,6 +1292,10 @@ async function resizeImage(file, maxW, maxH) {
     });
 }
 
+// Firestore má limit 1 MiB na dokument; obrázek je v base64 data URL o třetinu větší než soubor.
+const MAX_GIF_SIZE = 600 * 1024;
+const MAX_DATA_URL_LENGTH = 900 * 1024;
+
 async function handleImageUpload(file) {
     if (!detailExerciseId || !file) return;
     const MAX_SIZE = 1.5 * 1024 * 1024; // 1,5 MB surový soubor
@@ -1280,15 +1307,28 @@ async function handleImageUpload(file) {
     let dataUrl;
     try {
         if (file.type === "image/gif") {
+            // GIF nezmenšujeme (přišel by o animaci), proto musí být malý už na vstupu.
+            if (file.size > MAX_GIF_SIZE) {
+                alert("GIF je moc velký. Max 600 kB.");
+                return;
+            }
             dataUrl = await fileToDataUrl(file);
         } else if (file.type.startsWith("image/")) {
             dataUrl = await resizeImage(file, 640, 640);
+            // Velké PNG (fotky) by přes limit nepřetekly jen jako JPEG
+            if (dataUrl.length > MAX_DATA_URL_LENGTH && file.type === "image/png") {
+                dataUrl = await resizeImage(new File([file], "x.jpg", { type: "image/jpeg" }), 640, 640);
+            }
         } else {
             alert("Nahraj prosím obrázek nebo GIF.");
             return;
         }
     } catch (err) {
         alert("Chyba při zpracování souboru: " + err.message);
+        return;
+    }
+    if (dataUrl.length > MAX_DATA_URL_LENGTH) {
+        alert("Obrázek je i po zmenšení moc velký. Zkus menší soubor.");
         return;
     }
 
@@ -1311,7 +1351,7 @@ async function saveCustomImage(exerciseId, dataUrl) {
             ...(stats[exerciseId] || { exerciseId }),
             customImage: dataUrl,
         };
-        saveLocalStats(stats);
+        if (!saveLocalStats(stats)) return;
         exerciseStats = stats;
         renderExercisesList();
         renderDetail();

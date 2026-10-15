@@ -11,17 +11,13 @@ import {
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { initNavigation } from "./navigation.js?v=6200029e";
+import { isHttpUrl, safeHref } from "./url-utils.js?v=469cfb68";
 
 const STORAGE_KEY = "recept.bookmarks.v1";
 const PAGE_SIZE = 12;
 const FEATURED_COUNT = 8;
-const PREVIEW_API = "https://api.microlink.io/?url=";
-const PROXY_ENDPOINTS = [
-    "https://corsproxy.io/?url=",
-    "https://api.allorigins.win/raw?url=",
-];
 const TABS = ["unassigned", "1", "2", "3", "4", "reddit"];
-const TAB_2_PASSWORD = "abc129";
+const TAB2_LOCAL_KEY = "recept.bookmarks.tab2pw";
 
 // ===== Šifrování (Web Crypto API: PBKDF2 + AES-GCM) =====
 
@@ -297,20 +293,15 @@ if (BM_PARAMS) {
 }
 
 // ----- Záložkové přepínače -----
-tabsEl.addEventListener("click", (e) => {
+tabsEl.addEventListener("click", async (e) => {
     const btn = e.target.closest(".bookmark-tab");
     if (!btn) return;
     const tab = btn.dataset.tab;
     if (tab === activeTab) return;
 
-    // Heslem chráněná složka 2
+    // Heslem chráněná složka 2 (heslo si uživatel nastaví sám, ukládá se jen jeho hash)
     if (tab === "2" && !tab2Unlocked) {
-        const pwd = prompt("Heslo pro složku 2:");
-        if (pwd === null) return;
-        if (pwd !== TAB_2_PASSWORD) {
-            alert("Nesprávné heslo.");
-            return;
-        }
+        if (!(await unlockTab2())) return;
         tab2Unlocked = true;
     }
 
@@ -320,6 +311,57 @@ tabsEl.addEventListener("click", (e) => {
     });
     resetRender();
 });
+
+// ----- Heslo složky 2 -----
+// Pozor: jde jen o zámek v rozhraní, záložky složky 2 se načítají stejně jako ostatní.
+// Skutečnou ochranu dat dává šifrování záložek výše.
+async function hashTab2Password(pwd, saltHex) {
+    const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pwd), { name: "PBKDF2" }, false, ["deriveBits"]);
+    const salt = Uint8Array.from(saltHex.match(/.{2}/g), (x) => parseInt(x, 16));
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 200_000, hash: "SHA-256" }, km, 256);
+    return b64Enc(bits);
+}
+
+async function loadTab2Meta() {
+    if (currentUser) {
+        const snap = await getDoc(doc(db, "users", currentUser.uid, "meta", "tab2"));
+        return snap.exists() ? snap.data() : null;
+    }
+    try { return JSON.parse(localStorage.getItem(TAB2_LOCAL_KEY) || "null"); } catch { return null; }
+}
+
+async function saveTab2Meta(meta) {
+    if (currentUser) await setDoc(doc(db, "users", currentUser.uid, "meta", "tab2"), meta);
+    else localStorage.setItem(TAB2_LOCAL_KEY, JSON.stringify(meta));
+}
+
+async function unlockTab2() {
+    let meta;
+    try {
+        meta = await loadTab2Meta();
+    } catch (err) {
+        alert("Nelze ověřit heslo: " + err.message);
+        return false;
+    }
+    if (!meta || !meta.salt || !meta.hash) {
+        const pwd = prompt("Nastav si heslo pro složku 2:");
+        if (!pwd) return false;
+        if (prompt("Zadej heslo znovu pro kontrolu:") !== pwd) {
+            alert("Hesla se neshodují.");
+            return false;
+        }
+        const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+        await saveTab2Meta({ salt, hash: await hashTab2Password(pwd, salt) });
+        return true;
+    }
+    const pwd = prompt("Heslo pro složku 2:");
+    if (pwd === null) return false;
+    if ((await hashTab2Password(pwd, meta.salt)) !== meta.hash) {
+        alert("Nesprávné heslo.");
+        return false;
+    }
+    return true;
+}
 
 // ----- Filtr podle složky -----
 function filteredBookmarks() {
@@ -366,7 +408,7 @@ async function fetchRedditJson(jsonUrl) {
             if (!trimmed.startsWith("<")) {
                 return JSON.parse(trimmed);
             }
-            console.warn("Reddit vrátil HTML (blokování), zkouším proxy");
+            console.warn("Reddit vrátil HTML (blokování), zkouším Worker");
         } else {
             console.warn("Reddit přímo: HTTP " + res.status);
         }
@@ -374,29 +416,16 @@ async function fetchRedditJson(jsonUrl) {
         console.warn("Přímé volání Redditu selhalo:", err.message || err);
     }
 
-    // 2) Fallback přes veřejnou CORS proxy
-    const proxies = [
-        "https://corsproxy.io/?url=" + encodeURIComponent(jsonUrl),
-        "https://api.allorigins.win/raw?url=" + encodeURIComponent(jsonUrl),
-    ];
+    // 2) Fallback přes vlastní Worker (jen adresy reddit.com, žádná cizí proxy)
     let lastErr;
-    for (const proxyUrl of proxies) {
-        try {
-            const res = await fetch(proxyUrl);
-            if (!res.ok) {
-                lastErr = new Error("Proxy HTTP " + res.status);
-                continue;
-            }
-            const text = await res.text();
-            const trimmed = text.trim();
-            if (trimmed.startsWith("<")) {
-                lastErr = new Error("Proxy vrátila HTML");
-                continue;
-            }
-            return JSON.parse(trimmed);
-        } catch (err) {
-            lastErr = err;
-        }
+    try {
+        const res = await fetch(WORKER_API + encodeURIComponent(jsonUrl) + "&mode=reddit");
+        if (!res.ok) throw new Error("Worker HTTP " + res.status);
+        const text = (await res.text()).trim();
+        if (text.startsWith("<")) throw new Error("Worker vrátil HTML");
+        return JSON.parse(text);
+    } catch (err) {
+        lastErr = err;
     }
     throw lastErr || new Error("Všechny zdroje selhaly");
 }
@@ -592,59 +621,25 @@ async function removeBookmark(id) {
 }
 
 // ----- Náhled / obrázek -----
-// Řetěz: site-specific → microlink → og:image a další z HTML (přes proxy) → Wikipedia API
+// Řetěz: site-specific (YouTube, Imgur) → vlastní Cloudflare Worker.
+// Adresy záložek se záměrně neposílají žádné cizí službě (microlink, veřejné CORS proxy),
+// aby šifrované záložky zůstaly soukromé.
 async function fetchPreview(url) {
     const parsed = safeParseUrl(url);
     const hostname = parsed ? parsed.hostname : url;
-
-    let title = "";
-    let description = "";
-    let image = "";
-    let domain = hostname;
-
-    // 0) Site-specific: YouTube, Imgur — okamžité, bez sítě
     const siteImg = getSiteSpecificImage(url);
-    if (siteImg) image = siteImg;
 
-    // 1) microlink.io
+    let wp = null;
     try {
-        const res = await fetch(PREVIEW_API + encodeURIComponent(url));
-        if (res.ok) {
-            const json = await res.json();
-            if (json.status === "success" && json.data) {
-                const d = json.data;
-                title = d.title || "";
-                description = d.description || "";
-                if (!image && d.image && d.image.url) image = d.image.url;
-                if (d.publisher) domain = d.publisher;
-            }
-        }
+        wp = await fetchWorkerPreview(url);
     } catch (err) {
-        console.warn("microlink selhal:", err && err.message);
+        console.warn("Worker náhledu selhal:", err && err.message);
     }
-
-    // 2) Fallback: parsování meta/link/JSON-LD z HTML přes CORS proxy
-    if (!image || !title) {
-        const og = await fetchOpenGraph(url);
-        if (og) {
-            if (!image && og.image) image = og.image;
-            if (!title && og.title) title = og.title;
-            if (!description && og.description) description = og.description;
-            if (og.siteName && domain === hostname) domain = og.siteName;
-        }
-    }
-
-    // 3) Wikipedia REST API
-    if (!image) {
-        const wp = await getWikipediaImage(url);
-        if (wp) image = wp;
-    }
-
     return {
-        title: title || hostname,
-        description: description || "",
-        image: image || "",
-        domain: domain || hostname,
+        title: (wp && wp.title) || hostname,
+        description: (wp && wp.description) || "",
+        image: siteImg || (wp && wp.image) || "",
+        domain: (wp && wp.domain) || hostname,
     };
 }
 
@@ -667,183 +662,6 @@ function getSiteSpecificImage(url) {
     if (h === "i.imgur.com") return url;
 
     return "";
-}
-
-async function getWikipediaImage(url) {
-    const parsed = safeParseUrl(url);
-    if (!parsed) return "";
-    const m = parsed.hostname.match(/^([a-z]+)\.wikipedia\.org$/i);
-    if (!m) return "";
-    const pm = parsed.pathname.match(/^\/wiki\/(.+)$/);
-    if (!pm) return "";
-    try {
-        const res = await fetch(
-            "https://" + m[1] + ".wikipedia.org/api/rest_v1/page/summary/" + pm[1]
-        );
-        if (!res.ok) return "";
-        const data = await res.json();
-        return (data.thumbnail && data.thumbnail.source) || "";
-    } catch (_) {
-        return "";
-    }
-}
-
-async function fetchOpenGraph(url) {
-    let html = "";
-    for (const proxy of PROXY_ENDPOINTS) {
-        try {
-            const res = await fetch(proxy + encodeURIComponent(url));
-            if (!res.ok) continue;
-            const text = await res.text();
-            if (text && text.length > 200 && /<html|<head|<meta/i.test(text)) {
-                html = text;
-                break;
-            }
-        } catch (_) {}
-    }
-    if (!html) return null;
-
-    const parsed = safeParseUrl(url);
-    const origin = parsed ? parsed.origin : "";
-
-    const metaContent = (attr, value) => {
-        const esc = escapeRegex(value);
-        const re1 = new RegExp(
-            '<meta[^>]+' + attr + '=["\']' + esc + '["\'][^>]*content=["\']([^"\']+)["\']',
-            "i"
-        );
-        const re2 = new RegExp(
-            '<meta[^>]+content=["\']([^"\']+)["\'][^>]*' + attr + '=["\']' + esc + '["\']',
-            "i"
-        );
-        const m = html.match(re1) || html.match(re2);
-        return m ? decodeEntities(m[1].trim()) : "";
-    };
-
-    let image =
-        metaContent("property", "og:image") ||
-        metaContent("name", "og:image") ||
-        metaContent("property", "og:image:url") ||
-        metaContent("name", "twitter:image") ||
-        metaContent("property", "twitter:image") ||
-        metaContent("name", "twitter:image:src") ||
-        metaContent("itemprop", "image") ||
-        linkHref(html, "image_src") ||
-        extractJsonLdImage(html) ||
-        findFirstMeaningfulImage(html);
-    if (image) image = resolveUrl(image, origin);
-
-    let title =
-        metaContent("property", "og:title") ||
-        metaContent("name", "twitter:title");
-    if (!title) {
-        const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-        if (t) title = decodeEntities(t[1].trim());
-    }
-
-    const description =
-        metaContent("property", "og:description") ||
-        metaContent("name", "description") ||
-        metaContent("name", "twitter:description");
-
-    const siteName = metaContent("property", "og:site_name");
-
-    return { title, description, image, siteName };
-}
-
-function escapeRegex(s) {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function linkHref(html, rel) {
-    const esc = escapeRegex(rel);
-    const re1 = new RegExp(
-        '<link[^>]+rel=["\']' + esc + '["\'][^>]*href=["\']([^"\']+)["\']',
-        "i"
-    );
-    const re2 = new RegExp(
-        '<link[^>]+href=["\']([^"\']+)["\'][^>]*rel=["\']' + esc + '["\']',
-        "i"
-    );
-    const m = html.match(re1) || html.match(re2);
-    return m ? decodeEntities(m[1].trim()) : "";
-}
-
-function extractJsonLdImage(html) {
-    const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-    let m;
-    while ((m = re.exec(html)) !== null) {
-        const raw = m[1].trim();
-        if (!raw) continue;
-        try {
-            const parsed = JSON.parse(raw);
-            const img = pickImageFromJsonLd(parsed);
-            if (img) return img;
-        } catch (_) {}
-    }
-    return "";
-}
-
-function pickImageFromJsonLd(node) {
-    if (!node || typeof node !== "object") return "";
-    if (Array.isArray(node)) {
-        for (const item of node) {
-            const r = pickImageFromJsonLd(item);
-            if (r) return r;
-        }
-        return "";
-    }
-    if (node.image) {
-        if (typeof node.image === "string") return node.image;
-        if (Array.isArray(node.image)) {
-            for (const x of node.image) {
-                if (typeof x === "string") return x;
-                if (x && typeof x === "object" && x.url) return x.url;
-            }
-        }
-        if (typeof node.image === "object" && node.image.url) return node.image.url;
-    }
-    if (node["@graph"]) return pickImageFromJsonLd(node["@graph"]);
-    return "";
-}
-
-function findFirstMeaningfulImage(html) {
-    const bodyIdx = html.search(/<body[\s>]/i);
-    const start = bodyIdx === -1 ? 0 : bodyIdx;
-    const body = html.slice(start);
-    const re = /<img\b([^>]*)>/gi;
-    let m;
-    while ((m = re.exec(body)) !== null) {
-        const attrs = m[1];
-        const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
-        if (!srcMatch) continue;
-        const src = srcMatch[1];
-        if (!src || src.startsWith("data:")) continue;
-        if (/1x1|pixel|spacer|blank|tracking|analytics|beacon|sprite/i.test(src)) continue;
-        const w = parseInt((attrs.match(/\bwidth=["']?(\d+)/i) || [])[1] || "0", 10);
-        const h = parseInt((attrs.match(/\bheight=["']?(\d+)/i) || [])[1] || "0", 10);
-        if ((w > 0 && w < 120) || (h > 0 && h < 120)) continue;
-        return decodeEntities(src);
-    }
-    return "";
-}
-
-function resolveUrl(href, origin) {
-    if (/^https?:\/\//i.test(href)) return href;
-    if (href.startsWith("//")) return "https:" + href;
-    if (href.startsWith("/") && origin) return origin + href;
-    return href;
-}
-
-function decodeEntities(str) {
-    return str
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#0?39;/g, "'")
-        .replace(/&#x27;/gi, "'")
-        .replace(/&nbsp;/g, " ");
 }
 
 // Google favicon služba — spolehlivý poslední fallback při selhání obrázku
@@ -873,7 +691,7 @@ async function handleSubmit(event) {
     if (!/^https?:\/\//i.test(url)) {
         url = "https://" + url;
     }
-    if (!safeParseUrl(url)) {
+    if (!isHttpUrl(url)) {
         showStatus("Neplatná URL.", "error");
         return;
     }
@@ -883,21 +701,7 @@ async function handleSubmit(event) {
     showStatus("Načítám náhled stránky…", "info");
 
     try {
-        let preview = await fetchPreview(url);
-
-        // Worker fallback pokud chybí obrázek
-        if (!preview.image) {
-            try {
-                const wp = await fetchWorkerPreview(url);
-                if (wp) {
-                    if (!preview.image && wp.image) preview.image = wp.image;
-                    if (!preview.title && wp.title) preview.title = wp.title;
-                    if (!preview.description && wp.description) preview.description = wp.description;
-                    if (!preview.domain && wp.domain) preview.domain = wp.domain;
-                }
-            } catch (_) {}
-        }
-
+        const preview = await fetchPreview(url);
         const bookmark = {
             id: generateId(),
             url,
@@ -925,8 +729,14 @@ async function handleSubmit(event) {
 // Data pocházejí přímo z meta tagů stránky — žádný proxy, žádné limity.
 async function saveBookmarkletData({ url, title, desc, image, domain }) {
     if (!url) return;
+    // Parametry v adrese může podstrčit kdokoli odkazem – povolíme jen http(s) a necháme uživatele potvrdit.
+    if (!isHttpUrl(url)) {
+        showStatus("Záložku z bookmarkletu nelze uložit: adresa není http(s).", "error");
+        return;
+    }
     const parsed = safeParseUrl(url);
-    if (!parsed) return;
+    if (!confirm("Uložit záložku na " + parsed.hostname + "?")) return;
+    if (image && !isHttpUrl(image)) image = "";
 
     // Zkus najít existující záložku se stejnou URL
     const existing = bookmarks.find((b) => b.url === url);
@@ -978,7 +788,7 @@ async function fetchWorkerPreview(url) {
     return data;
 }
 
-// Přegeneruje náhled záložky: fetchPreview → Worker fallback
+// Přegeneruje náhled záložky přes fetchPreview
 async function regenBookmarkPreview(bookmark, btn) {
     if (btn.disabled) return;
     btn.disabled = true;
@@ -986,23 +796,7 @@ async function regenBookmarkPreview(bookmark, btn) {
     showStatus("Přegenerovávám náhled…", "info");
 
     try {
-        let preview = await fetchPreview(bookmark.url);
-
-        // Fallback přes Cloudflare Worker pokud chybí obrázek nebo title
-        if (!preview.image || !preview.title || preview.title === bookmark.domain) {
-            try {
-                const wp = await fetchWorkerPreview(bookmark.url);
-                if (wp) {
-                    if (!preview.image && wp.image) preview.image = wp.image;
-                    if ((!preview.title || preview.title === bookmark.domain) && wp.title) preview.title = wp.title;
-                    if (!preview.description && wp.description) preview.description = wp.description;
-                    if (!preview.domain && wp.domain) preview.domain = wp.domain;
-                }
-            } catch (err) {
-                console.warn("Worker fallback selhal:", err.message);
-            }
-        }
-
+        const preview = await fetchPreview(bookmark.url);
         const newImg = preview.image || "";
         _patchBookmarkId = bookmark.id;
         await updateBookmark({
@@ -1149,7 +943,7 @@ function renderRedditError(skeleton, bookmark, msg) {
     const meta = document.createElement("div");
     meta.className = "reddit-card-meta";
     const link = document.createElement("a");
-    link.href = bookmark.url;
+    link.href = safeHref(bookmark.url);
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = "Otevřít na Redditu →";
@@ -1265,7 +1059,7 @@ function createRedditCard(post, bookmark) {
     if (target && !target.includes("reddit.com") && !/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(target)) {
         const ext = document.createElement("a");
         ext.className = "reddit-card-stat reddit-card-stat-link";
-        ext.href = target;
+        ext.href = safeHref(target);
         ext.target = "_blank";
         ext.rel = "noopener noreferrer";
         const host = safeParseUrl(target);
@@ -1335,7 +1129,7 @@ function renderFeatured() {
 
 function createFeaturedTile(bookmark) {
     const link = document.createElement("a");
-    link.href = bookmark.url;
+    link.href = safeHref(bookmark.url);
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.className = "bookmark-featured-item";
@@ -1519,7 +1313,7 @@ async function fixBrokenPreviews() {
                 console.warn("Nelze aktualizovat náhled pro", bookmark.url, err);
             }
 
-            // Šetrné tempo vůči microlink.io
+            // Šetrné tempo vůči Workeru a cílovým webům
             await new Promise((r) => setTimeout(r, 300));
         }
 
@@ -1563,7 +1357,7 @@ function createTile(bookmark) {
 
     // Klikatelný odkaz
     const link = document.createElement("a");
-    link.href = bookmark.url;
+    link.href = safeHref(bookmark.url);
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.className = "bookmark-link";

@@ -85,7 +85,7 @@ Starší formát (`den -> číslo`) se při načtení automaticky převede (`mig
 | Předplatná | `recept.budget.subs.v1` | `_subs` → `{ subs }` |
 | Šablony | `recept.budget.templates.v1` | `_templates` → `{ templates }` |
 
-Nepřihlášený uživatel používá jen localStorage. Přihlášený čte období přes `onSnapshot`, ostatní dokumenty přes `getDoc`. Zápisy jsou odložené (debounce 400 ms). Firestore má zapnutou offline cache (IndexedDB).
+Nepřihlášený uživatel používá jen localStorage. Přihlášený čte období přes `onSnapshot`, ostatní dokumenty přes `getDoc`. Zápisy jsou odložené (debounce 400 ms) a při skrytí nebo zavření stránky se odešlou hned. Do Firestore se posílají jen změněné dny a pole (`setDoc` s `merge`, rozdíl počítá `diffDoc` v `sync-logic.js`), takže souběžné úpravy z více zařízení se nepřepíšou; na potvrzení serveru se nečeká. Firestore má zapnutou offline cache (IndexedDB).
 
 ### 3.4 Načítání a odolnost
 - Do načtení dat se místo kalendáře zobrazuje točící se kolečko; při chybě nebo po 15 s se zobrazí chybová hláška.

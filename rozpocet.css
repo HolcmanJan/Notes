@@ -301,3 +301,30 @@ body.budget-page header h1 { color: var(--bx-ink); }
 
 .bx-toast { position: fixed; left: 1rem; right: 1rem; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 1300; max-width: 520px; margin: 0 auto; background: #2b2622; color: #fff; border-radius: 14px; padding: 0.75rem 1rem; font-size: 0.86rem; font-weight: 600; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity 0.2s, transform 0.2s; }
 .bx-toast.show { opacity: 1; transform: none; }
+
+/* Desktop: dva sloupce (období + hlavní karta vlevo, přehled vpravo) */
+@media (min-width: 1024px) {
+    .bx {
+        max-width: 1200px;
+        display: grid;
+        grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+        gap: 0 2rem;
+        align-items: start;
+    }
+    .bx-aside { position: sticky; top: 88px; }
+    .bx-content { min-width: 0; }
+    /* Hlavní karta zůstává vidět, připnutá lišta není potřeba */
+    .bx-sticky { display: none; }
+    body.budget-page header { position: sticky; background: rgba(243, 239, 231, 0.92); border-bottom: 1px solid var(--bx-line); padding: 0.75rem 0; margin-bottom: 1.5rem; }
+    body.budget-page header h1 { font-size: 1.35rem; }
+    /* Celoobrazovkové pohledy jen přes obsah, panel zůstane vidět */
+    .bx-view { left: var(--side-w); padding: 1.5rem 2rem 7rem; }
+    .bx-view-inner { max-width: 760px; }
+    .bx-bottom-bar { left: var(--side-w); }
+    .bx-bottom-bar-inner { max-width: 760px; }
+    .bx-toast { left: calc(var(--side-w) + 1rem); bottom: 1.5rem; }
+    /* Spodní panel jako dialog uprostřed */
+    .bx-backdrop { align-items: center; }
+    .bx-sheet { height: auto; max-height: 88vh; border-radius: 22px; padding: 1.25rem 1.25rem 1.5rem; }
+    .bx-sheet::before { display: none; }
+}

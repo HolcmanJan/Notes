@@ -9,7 +9,7 @@ import {
     onSnapshot,
     deleteField,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js?v=6200029e";
+import { initNavigation } from "./navigation.js?v=a75100d9";
 import * as logic from "./budget-logic.js?v=00b71e40";
 import { diffDoc, mapDeletes } from "./sync-logic.js?v=68881def";
 const { fmtDate } = logic;

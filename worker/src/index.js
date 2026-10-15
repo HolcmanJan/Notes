@@ -1,25 +1,95 @@
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+// Povolené weby, které smí Worker volat z prohlížeče. Lze přepsat proměnnou ALLOWED_ORIGINS
+// (čárkami oddělený seznam) ve wrangler.toml nebo v nastavení Workeru na Cloudflare.
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://holcmanjan.github.io",
+  "http://localhost:8000",
+  "http://127.0.0.1:8000",
+];
+
+const REDDIT_HOSTS = new Set([
+  "reddit.com", "www.reddit.com", "old.reddit.com", "new.reddit.com", "np.reddit.com", "m.reddit.com",
+]);
+
+function allowedOrigins(env) {
+  const raw = env && env.ALLOWED_ORIGINS;
+  return raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : DEFAULT_ALLOWED_ORIGINS;
+}
+
+function corsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    Vary: "Origin",
+  };
+}
+
+// Jen veřejné http(s) adresy – žádné localhost, IP adresy vnitřních sítí ani jiná schémata.
+function isPublicHttpUrl(parsed) {
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  const h = parsed.hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) return false;
+  if (/^\[/.test(h) || h.includes(":")) return false; // IPv6 literály
+  const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if (a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
+    const origin = request.headers.get("Origin") || "";
+    if (!allowedOrigins(env).includes(origin)) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    const cors = corsHeaders(origin);
+
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers: cors });
+    }
+    if (request.method !== "GET") {
+      return jsonResponse({ error: "Method not allowed" }, 405, cors);
     }
 
     const { searchParams } = new URL(request.url);
     const targetUrl = searchParams.get("url");
 
     if (!targetUrl) {
-      return jsonResponse({ error: "Missing ?url= parameter" }, 400);
+      return jsonResponse({ error: "Missing ?url= parameter" }, 400, cors);
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      return jsonResponse({ error: "Invalid URL" }, 400, cors);
+    }
+    if (!isPublicHttpUrl(parsed)) {
+      return jsonResponse({ error: "URL not allowed" }, 400, cors);
+    }
+
+    // Režim pro Reddit: vrátí surový JSON, ale jen z domén Redditu
+    if (searchParams.get("mode") === "reddit") {
+      if (!REDDIT_HOSTS.has(parsed.hostname.toLowerCase()) || !parsed.pathname.endsWith(".json")) {
+        return jsonResponse({ error: "Reddit JSON only" }, 400, cors);
+      }
+      const res = await fetch(parsed.toString(), {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; link-preview/1.0)", Accept: "application/json" },
+      });
+      return new Response(await res.text(), {
+        status: res.status,
+        headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
+      });
     }
 
     try {
       const result = await getPreview(targetUrl);
-      return jsonResponse(result);
+      return jsonResponse(result, 200, cors);
     } catch (err) {
       return jsonResponse({
         title: "",
@@ -27,16 +97,16 @@ export default {
         image: "",
         domain: "",
         error: err.message,
-      }, 500);
+      }, 500, cors);
     }
   },
 };
 
-function jsonResponse(data, status = 200) {
+function jsonResponse(data, status, cors) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
-      ...CORS_HEADERS,
+      ...cors,
       "Content-Type": "application/json",
       "Cache-Control": "public, max-age=86400",
     },
@@ -139,7 +209,8 @@ async function getWikipediaPreview(parsed) {
   if (!m || !pm) return null;
   try {
     const res = await fetch(
-      "https://" + m[1] + ".wikipedia.org/api/rest_v1/page/summary/" + pm[1]
+      "https://" + m[1] + ".wikipedia.org/api/rest_v1/page/summary/" +
+        encodeURIComponent(decodeURIComponent(pm[1]))
     );
     if (!res.ok) return null;
     const data = await res.json();

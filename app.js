@@ -56,6 +56,7 @@ initNavigation("recepty", (user) => {
 
     if (user) {
         // Přihlášen – odebírej data z Firestore
+        offerLocalRecipesUpload(user);
         const recipesRef = collection(db, "users", user.uid, "recipes");
         unsubscribeRecipes = onSnapshot(
             recipesRef,
@@ -122,12 +123,38 @@ function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+function reportCloudError(err) {
+    console.error(err);
+    alert("Změnu se nepodařilo uložit do cloudu: " + err.message);
+}
+
+// Recepty uložené bez přihlášení po přihlášení nabídneme nahrát do cloudu, jinak by zmizely z pohledu.
+async function offerLocalRecipesUpload(user) {
+    const local = loadLocalRecipes();
+    if (!local.length) return;
+    const ok = confirm(
+        "V tomto prohlížeči máš " + local.length + " receptů uložených bez přihlášení. Nahrát je do svého účtu?"
+    );
+    if (!ok) return;
+    try {
+        await Promise.all(local.map((r) => {
+            const { id, ...data } = r;
+            return setDoc(doc(db, "users", user.uid, "recipes", id), data, { merge: true });
+        }));
+        localStorage.removeItem(STORAGE_KEY);
+    } catch (err) {
+        reportCloudError(err);
+    }
+}
+
 // ----- Ukládání / mazání (abstrakce nad backendem) -----
 async function persistRecipe(recipe) {
     if (currentUser) {
         const ref = doc(db, "users", currentUser.uid, "recipes", recipe.id);
         const { id, ...data } = recipe;
-        await setDoc(ref, data);
+        // Nečekáme na potvrzení serveru: offline by se slib splnil až po připojení a formulář by visel.
+        // Firestore zápis drží v lokální cache a odešle ho, jakmile bude signál.
+        setDoc(ref, data).catch(reportCloudError);
     } else {
         const idx = recipes.findIndex((r) => r.id === recipe.id);
         if (idx !== -1) {
@@ -142,7 +169,7 @@ async function persistRecipe(recipe) {
 
 async function removeRecipe(id) {
     if (currentUser) {
-        await deleteDoc(doc(db, "users", currentUser.uid, "recipes", id));
+        deleteDoc(doc(db, "users", currentUser.uid, "recipes", id)).catch(reportCloudError);
     } else {
         recipes = recipes.filter((r) => r.id !== id);
         saveLocalRecipes();

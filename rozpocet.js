@@ -7,9 +7,11 @@ import {
     getDocs,
     collection,
     onSnapshot,
+    deleteField,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { initNavigation } from "./navigation.js?v=6200029e";
 import * as logic from "./budget-logic.js?v=00b71e40";
+import { diffDoc, mapDeletes } from "./sync-logic.js?v=68881def";
 const { fmtDate } = logic;
 
 const REQUIRED_IDS = [
@@ -190,6 +192,8 @@ function findCurrentIndex(boundaries) {
 }
 
 function computePeriod(offset) {
+    // Rozepsanou změnu ulož ještě do starého období, než se přepne klíč.
+    if (saveTimeout) flushSave();
     const boundaries = buildBoundaries();
     const curIdx = findCurrentIndex(boundaries);
     const targetIdx = curIdx + offset;
@@ -288,13 +292,34 @@ function normalizeBudget(raw) {
     return b;
 }
 
+// Poslední stav období potvrzený serverem nebo námi uložený – z rozdílu proti němu se posílají jen změny,
+// takže zápis z jiného zařízení (i offline) se nepřepíše celým dokumentem.
+let syncedBase = { key: null, data: null };
+
+function rememberSynced(key, data) {
+    syncedBase = { key, data: JSON.parse(JSON.stringify(data)) };
+}
+
 async function persistBudgetData() {
     if (!budgetData) return;
     if (currentUser) {
         const key = periodKey();
         saveCachePeriod(currentUser.uid, key, budgetData);
         const ref = doc(db, "users", currentUser.uid, "budget", key);
-        await setDoc(ref, budgetData);
+        const base = syncedBase.key === key ? syncedBase.data : null;
+        // Bez známého stavu serveru (ještě nepřišel snapshot) zapíšeme celý dokument jako dřív.
+        const write = base
+            ? (() => {
+                const patch = diffDoc(base, budgetData);
+                return patch ? setDoc(ref, mapDeletes(patch, deleteField()), { merge: true }) : null;
+            })()
+            : setDoc(ref, budgetData);
+        rememberSynced(key, budgetData);
+        // Nečekáme na potvrzení serveru: offline by se slib splnil až po připojení a UI by viselo.
+        if (write) write.catch((err) => {
+            console.error(err);
+            showToast("Uložení do cloudu selhalo: " + err.message);
+        });
     } else {
         const allData = loadLocal();
         allData[periodKey()] = budgetData;
@@ -305,15 +330,25 @@ async function persistBudgetData() {
 let saveTimeout = null;
 function debouncedSave() {
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-        saveTimeout = null;
-        try {
-            await persistBudgetData();
-        } catch (err) {
-            console.error(err);
-        }
-    }, 400);
+    saveTimeout = setTimeout(flushSave, 400);
 }
+
+async function flushSave() {
+    if (!saveTimeout) return;
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+    try {
+        await persistBudgetData();
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+// Při zavření nebo přepnutí aplikace ulož hned – jinak by se poslední změna v 400ms okně ztratila.
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushSave();
+});
+window.addEventListener("pagehide", flushSave);
 
 // ----- Výpočty -----
 function daySpent(dateStr) {
@@ -419,6 +454,7 @@ function loadPeriodData(attempt = 0) {
                 if (seq !== loadSeq) return;
                 gotFirst = true;
                 budgetData = snapshot.exists() ? normalizeBudget(snapshot.data()) : defaultBudget();
+                if (snapshot.exists()) rememberSynced(key, budgetData);
                 saveCachePeriod(uid, key, budgetData);
                 render();
             },
@@ -1902,6 +1938,7 @@ try {
 
 initNavigation("rozpocet", (user) => {
     currentUser = user;
+    syncedBase = { key: null, data: null };
     try {
         if (user) localStorage.setItem(LAST_UID_KEY, user.uid);
         else localStorage.removeItem(LAST_UID_KEY);

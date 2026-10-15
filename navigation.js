@@ -14,9 +14,24 @@ const NAV_ITEMS = [
     { key: "nastaveni", label: "Nastavení", icon: "⚙", href: "nastaveni.html" },
 ];
 
+// Postranní panel na desktopu: všechny moduly, nastavení zvlášť dole.
+const SIDE_ITEMS = [
+    { key: "home", label: "Domů", icon: "🏠", href: "index.html" },
+    { key: "recepty", label: "Recepty", icon: "🍳", href: "recepty.html" },
+    { key: "rozpocet", label: "Rozpočet", icon: "💰", href: "rozpocet.html" },
+    { key: "cviceni", label: "Cvičení", icon: "💪", href: "cviceni.html" },
+    { key: "zalozky", label: "Záložky", icon: "🔖", href: "zalozky.html" },
+    { key: "palivo", label: "Palivo", icon: "⛽", href: "palivo.html" },
+    { key: "hry", label: "Hry", icon: "🎮", href: "hry.html" },
+];
+const SIDE_FOOTER_ITEMS = [
+    { key: "nastaveni", label: "Nastavení", icon: "⚙", href: "nastaveni.html" },
+];
+
 // Jednotný vstupní bod pro inicializaci navigace na stránce.
 export function initNavigation(activePage, onUserChange) {
     renderBottomNav(activePage);
+    renderSideNav(activePage);
     ensureHeaderAvatar();
     initAuth(onUserChange);
 }
@@ -209,6 +224,74 @@ function renderPopover() {
         });
         pop.appendChild(login);
     }
+}
+
+// Aktivní položka postranního panelu podle názvu souboru (Palivo a Hry
+// se ve spodní liště hlásí jako "home", tady mají vlastní položku).
+function currentSideKey(activePage) {
+    const file = location.pathname.split("/").pop() || "index.html";
+    const all = [...SIDE_ITEMS, ...SIDE_FOOTER_ITEMS];
+    const hit = all.find((it) => it.href === file);
+    return hit ? hit.key : activePage;
+}
+
+function buildSideLink(item, activeKey) {
+    const a = document.createElement("a");
+    a.href = item.href;
+    a.className = "side-nav-item";
+    if (item.key === activeKey) {
+        a.classList.add("active");
+        a.setAttribute("aria-current", "page");
+    }
+    const icon = document.createElement("span");
+    icon.className = "side-nav-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = item.icon;
+    a.appendChild(icon);
+    const lbl = document.createElement("span");
+    lbl.className = "side-nav-label";
+    lbl.textContent = item.label;
+    a.appendChild(lbl);
+    return a;
+}
+
+// Levý postranní panel (viditelný jen na širokých obrazovkách, viz styles.css).
+function renderSideNav(activePage) {
+    const old = document.getElementById("side-nav");
+    if (old) old.remove();
+    const activeKey = currentSideKey(activePage);
+
+    const nav = document.createElement("nav");
+    nav.id = "side-nav";
+    nav.className = "side-nav";
+    nav.setAttribute("aria-label", "Moduly aplikace");
+
+    const brand = document.createElement("a");
+    brand.href = "index.html";
+    brand.className = "side-nav-brand";
+    const logo = document.createElement("img");
+    logo.src = "icon.svg";
+    logo.alt = "";
+    logo.width = 28;
+    logo.height = 28;
+    brand.appendChild(logo);
+    const name = document.createElement("span");
+    name.textContent = "Moje aplikace";
+    brand.appendChild(name);
+    nav.appendChild(brand);
+
+    const list = document.createElement("div");
+    list.className = "side-nav-list";
+    for (const item of SIDE_ITEMS) list.appendChild(buildSideLink(item, activeKey));
+    nav.appendChild(list);
+
+    const foot = document.createElement("div");
+    foot.className = "side-nav-footer";
+    for (const item of SIDE_FOOTER_ITEMS) foot.appendChild(buildSideLink(item, activeKey));
+    nav.appendChild(foot);
+
+    document.body.prepend(nav);
+    document.body.classList.add("has-side-nav");
 }
 
 function renderBottomNav(activePage) {

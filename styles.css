@@ -4112,3 +4112,161 @@ body.bulk-active {
     flex: 1;
     min-width: 0;
 }
+
+/* ============ Desktop: postranní panel místo spodní lišty ============ */
+.side-nav {
+    display: none;
+}
+
+@media (min-width: 1024px) {
+    :root {
+        --side-w: 240px;
+    }
+
+    .bottom-nav {
+        display: none;
+    }
+
+    body.has-bottom-nav {
+        padding-bottom: 0;
+    }
+
+    body.has-side-nav {
+        padding-left: var(--side-w);
+    }
+
+    .side-nav {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 900;
+        width: var(--side-w);
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        padding: 1rem 0.75rem;
+        background: var(--surface);
+        border-right: 1px solid var(--border);
+        overflow-y: auto;
+    }
+
+    .side-nav-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        padding: 0.35rem 0.6rem 1.1rem;
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 1.05rem;
+    }
+
+    .side-nav-brand img {
+        border-radius: 8px;
+        flex-shrink: 0;
+    }
+
+    .side-nav-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+    }
+
+    .side-nav-footer {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding-top: 0.6rem;
+        border-top: 1px solid var(--border);
+    }
+
+    .side-nav-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.55rem 0.75rem;
+        border-radius: 8px;
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.95rem;
+        font-weight: 500;
+        transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .side-nav-item:hover {
+        background: var(--bg);
+        color: var(--text);
+    }
+
+    .side-nav-item:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: -2px;
+    }
+
+    .side-nav-item.active {
+        background: var(--accent);
+        color: var(--primary-hover);
+        font-weight: 600;
+    }
+
+    .side-nav-icon {
+        width: 1.5rem;
+        text-align: center;
+        font-size: 1.15rem;
+        line-height: 1;
+    }
+
+    /* Horní lišta jako panel nástrojů okna */
+    header {
+        position: sticky;
+        top: 0;
+        z-index: 800;
+        padding: 0.75rem 0;
+        margin-bottom: 1.75rem;
+        background: rgba(255, 255, 255, 0.92);
+        -webkit-backdrop-filter: blur(8px);
+        backdrop-filter: blur(8px);
+    }
+
+    header h1 {
+        font-size: 1.35rem;
+    }
+
+    .container {
+        max-width: 1200px;
+        padding: 0 2rem;
+    }
+
+    main.container {
+        padding-bottom: 2.5rem;
+    }
+
+    /* Popover účtu pod horní lištou */
+    .user-popover {
+        top: 64px;
+        right: 2rem;
+    }
+
+    /* Domovská stránka a Hry: dlaždice v širší mřížce */
+    .home-hero {
+        text-align: left;
+        margin: 0.5rem 0 1.75rem;
+    }
+
+    .tile-grid {
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    }
+
+    /* Hromadné akce: lišta už nemusí sedět nad spodní navigací */
+    .bulk-bar {
+        left: var(--side-w);
+        bottom: 0;
+    }
+
+    /* Hlášky záložek centrované v obsahu, ne přes panel */
+    .bookmark-status {
+        left: calc(50% + var(--side-w) / 2);
+    }
+}

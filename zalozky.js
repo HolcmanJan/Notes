@@ -10,7 +10,7 @@ import {
     deleteDoc,
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js?v=6200029e";
+import { initNavigation } from "./navigation.js?v=a75100d9";
 import { isHttpUrl, safeHref } from "./url-utils.js?v=469cfb68";
 
 const STORAGE_KEY = "recept.bookmarks.v1";

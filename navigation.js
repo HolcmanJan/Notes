@@ -20,7 +20,6 @@ const SIDE_ITEMS = [
     { key: "recepty", label: "Recepty", icon: "🍳", href: "recepty.html" },
     { key: "rozpocet", label: "Rozpočet", icon: "💰", href: "rozpocet.html" },
     { key: "cviceni", label: "Cvičení", icon: "💪", href: "cviceni.html" },
-    { key: "zalozky", label: "Záložky", icon: "🔖", href: "zalozky.html" },
     { key: "palivo", label: "Palivo", icon: "⛽", href: "palivo.html" },
     { key: "hry", label: "Hry", icon: "🎮", href: "hry.html" },
 ];

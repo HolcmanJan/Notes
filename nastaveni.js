@@ -1,5 +1,5 @@
 // Logika stránky s nastavením.
-import { initNavigation } from "./navigation.js?v=a75100d9";
+import { initNavigation } from "./navigation.js?v=8d3350d9";
 
 const SETTING_COMPACT = "recept.setting.compact";
 const SETTING_CONFIRM_DELETE = "recept.setting.confirmDelete";

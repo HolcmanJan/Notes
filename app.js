@@ -6,7 +6,7 @@ import {
     deleteDoc,
     onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js?v=a75100d9";
+import { initNavigation } from "./navigation.js?v=8d3350d9";
 
 // ----- Stav aplikace -----
 const STORAGE_KEY = "recept.recipes.v1";

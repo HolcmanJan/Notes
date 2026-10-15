@@ -11,7 +11,7 @@ import {
     orderBy,
     limit,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initNavigation } from "./navigation.js?v=a75100d9";
+import { initNavigation } from "./navigation.js?v=8d3350d9";
 
 // ===== Katalog partií =====
 const GROUPS = [

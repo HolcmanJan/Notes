@@ -184,7 +184,7 @@ h3 { font-size: 15px; text-transform: uppercase; color: #fff; }
 /* mřížka vylepšení */
 .ugrid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 7px 8px; background: var(--bg); }
 #page .ugrid { padding: 0; background: none; }
-#run-grid { flex: 1 1 0; min-height: 120px; max-height: 38vh; overflow-y: auto; align-content: start; }
+#run-grid { flex: 1 1 0; min-height: 90px; max-height: 28.5vh; overflow-y: auto; align-content: start; }
 .ucell { display: flex; align-items: center; justify-content: space-between; gap: 6px; background: var(--cell); border: 2px solid var(--cell-line); border-radius: 2px; padding: 6px 6px 6px 10px; cursor: pointer; user-select: none; min-height: 66px; box-shadow: 0 0 6px #bff6ee44, inset 0 0 8px #0005; transition: transform .05s; position: relative; }
 .ucell:active { transform: scale(.97); }
 .uname { font-weight: 800; font-size: 15px; line-height: 1.12; }
@@ -319,4 +319,4 @@ select { width: auto; }
 .toast.bad { border-color: var(--bad); }
 .toast.out { opacity: 0; transform: translateY(-10px); }
 
-@media (max-height: 680px) { #run-grid { max-height: 30vh; } .top-cur { font-size: 16px; } }
+@media (max-height: 680px) { #run-grid { max-height: 22.5vh; } .top-cur { font-size: 16px; } }

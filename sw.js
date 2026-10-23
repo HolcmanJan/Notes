@@ -1,6 +1,6 @@
 // Service worker: síť má přednost (vždy čerstvá verze), cache slouží jako offline záloha.
 // Při slabém signálu se po NETWORK_TIMEOUT_MS použije verze z cache a síť ji dotáhne na pozadí.
-const CACHE = "moje-aplikace-v2";
+const CACHE = "moje-aplikace-v3";
 const NETWORK_TIMEOUT_MS = 4000;
 const PRECACHE = [
     "./", "index.html", "recepty.html", "rozpocet.html", "cviceni.html", "palivo.html", "zalozky.html",
@@ -8,6 +8,9 @@ const PRECACHE = [
     "styles.css", "rozpocet.css", "app-guard.js", "firebase-init.js", "navigation.js", "home.js", "app.js",
     "rozpocet.js", "budget-logic.js", "sync-logic.js", "url-utils.js", "cviceni.js", "palivo.js", "zalozky.js",
     "hry.js", "nastaveni.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon.svg",
+    "hry-tower/index.html", "hry-tower/css/style.css", "hry-tower/js/lib/pixi.min.js", "hry-tower/js/lib/pixi-filters.js",
+    ...["util", "wikidata", "data", "state", "game", "render2d", "render", "icons", "ui", "pages", "more", "main", "cloud"]
+        .map((f) => `hry-tower/js/${f}.js`),
 ];
 
 self.addEventListener("install", (event) => {

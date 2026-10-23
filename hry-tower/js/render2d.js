@@ -10,7 +10,7 @@ function initCanvas2d(cv) {
     game.cw = r.width; game.ch = r.height;
     cv.width = Math.max(1, Math.round(r.width * game.dpr));
     cv.height = Math.max(1, Math.round(r.height * game.dpr));
-    game.scale = Math.min(r.width, r.height) / 2 / VIEW_R;
+    fitScale(true);
   };
   new ResizeObserver(resize).observe(cv.parentElement);
   resize();
@@ -40,7 +40,7 @@ function render2d() {
   if (!ctx || !game.cw) return;
   const R = game.run;
   const skin = curSkin();
-  const w = game.cw, h = game.ch, s = game.scale, px = 1 / s;
+  const w = game.cw, h = game.ch, s = fitScale(), px = 1 / s;
   ctx.setTransform(game.dpr, 0, 0, game.dpr, 0, 0);
   ctx.fillStyle = curBg().bg;
   ctx.fillRect(0, 0, w, h);

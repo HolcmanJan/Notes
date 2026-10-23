@@ -5,6 +5,15 @@ const EBULLET_SPD = 25, MISSILE_SPD = 35;
 
 const game = { run: null, cv: null, ctx: null, cw: 0, ch: 0, dpr: 1, scale: 1, userPaused: false, stars: [] };
 
+// přiblížení bojiště podle dosahu věže – při menším dosahu jsou věž i nepřátelé větší
+function fitScale(snap) {
+  const R = game.run;
+  const viewR = R && R.S ? Math.min(VIEW_R, Math.max(38, R.S.range * 1.12 + 4)) : VIEW_R;
+  const target = Math.min(game.cw, game.ch) / 2 / viewR;
+  game.scale = snap || !game.scale ? target : game.scale + (target - game.scale) * 0.08;
+  return game.scale;
+}
+
 const SNAP_KEYS = ['tier', 'tourney', 'disso', 'bc', 'wave', 'hpLv', 'atkLv', 'time', 'hp', 'cash', 'lv', 'perks', 'perkCount', 'nextPerkWave', 'perkUw', 'perkFirstDone', 'cardsEq', 'uwOff', 'uwToggles',
   'kills', 'coinsEarned', 'cashEarned', 'bossKills', 'gemsEarned', 'stonesEarned', 'cellsEarned', 'card', 'uwT', 'golden', 'chrono', 'speed', 'gemCount', 'gemNext', 'ctr', 'introLeft', 'wallState', 'protCd', 'demonRevengeWave', 'barrageUsed', 'infinity'];
 

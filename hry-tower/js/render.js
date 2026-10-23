@@ -25,7 +25,7 @@ function initCanvas(cv) {
     PX.app.renderer.resize(w, h);
     cv.style.width = '100%'; cv.style.height = '100%';
     game.cw = w; game.ch = h;
-    game.scale = Math.min(w, h) / 2 / VIEW_R;
+    fitScale(true);
     layoutScreen();
   };
   new ResizeObserver(resize).observe(wrap);
@@ -281,7 +281,7 @@ function render() {
   PX.last = now;
   PX.frame++;
   const R = game.run;
-  const w = game.cw, h = game.ch, s = game.scale;
+  const w = game.cw, h = game.ch, s = fitScale();
   const bg = curBg();
   PX.app.renderer.background.color = hex(bg.bg);
   PX.nebula.tint = 0xffffff;

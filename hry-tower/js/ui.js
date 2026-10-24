@@ -263,7 +263,9 @@ function updateRunUI() {
   $('#h-cash').textContent = fmt(Math.floor(R.cash));
   $('#h-coins').textContent = fmt(Math.floor(save.coins));
   $('#h-gems').textContent = fmt(Math.floor(save.gems));
-  $('#h-speed').textContent = 'x' + R.speed;
+  const eff = R.effSpeed || R.speed;
+  $('#h-speed').textContent = 'x' + R.speed + (eff < R.speed * 0.85 && !game.userPaused ? ` (~${Math.round(eff)})` : '');
+  $('#h-speed').title = eff < R.speed * 0.85 ? 'Zařízení nestíhá – skutečná rychlost je nižší' : '';
   $('#btn-pause').textContent = game.userPaused ? '▶' : '❚❚';
   const bon = adBonusActive();
   $('#bonus-st').textContent = save.shop.noAds ? 'Vždy aktivní' : bon ? fmtTime((save.adBonusUntil - Date.now()) / 1000) : 'Neaktivní';

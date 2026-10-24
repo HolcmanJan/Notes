@@ -3,7 +3,7 @@
 const VIEW_R = 66, SPAWN_R = 80, TOWER_R = 3.2, STEP = 1 / 30, WALL_R = 8.5;
 const EBULLET_SPD = 25, MISSILE_SPD = 35;
 
-const game = { run: null, cv: null, ctx: null, cw: 0, ch: 0, dpr: 1, scale: 1, userPaused: false, stars: [] };
+const game = { run: null, cv: null, ctx: null, cw: 0, ch: 0, dpr: 1, scale: 1, userPaused: false, stars: [], fxQ: [] };
 
 // přiblížení bojiště podle dosahu věže – při menším dosahu jsou věž i nepřátelé větší
 function fitScale(snap) {
@@ -117,18 +117,27 @@ function refreshStats(R) {
 }
 
 // ---------- hlavní smyčka ----------
-function tick(realDt) {
+// Na vysokých rychlostech (až 500×) by simulace zahltila snímek – každý tick má časový rozpočet,
+// nestihnutý zbytek se přenese do dalšího (max. 0,5 s reálného času), takže prohlížeč nezamrzne.
+function tick(realDt, budgetMs = 10) {
   const R = game.run;
   if (!R || R.over) return;
   if (R.dirty || (R.statT += realDt) > 1) { refreshStats(R); R.statT = 0; R.dirty = false; }
-  if (R.paused || game.userPaused) return;
+  if (R.paused || game.userPaused) { R.simDebt = 0; return; }
   save.stats.playTime += realDt;
-  let gdt = realDt * R.speed;
+  const want = realDt * R.speed;
+  let gdt = want + (R.simDebt || 0);
+  const t0 = performance.now();
+  let done = 0;
   while (gdt > 1e-6 && !R.over && !R.paused) {
     const d = Math.min(STEP, gdt);
     step(R, d);
-    gdt -= d;
+    gdt -= d; done += d;
+    if (performance.now() - t0 > budgetMs) break;
   }
+  R.simDebt = R.paused || R.over ? 0 : Math.min(Math.max(0, gdt), R.speed * 0.5);
+  // skutečně dosažená rychlost (vyhlazená) pro HUD
+  if (realDt > 0) R.effSpeed = (R.effSpeed || R.speed) * 0.9 + (done / realDt) * 0.1;
 }
 
 function step(R, dt) {
@@ -1296,6 +1305,8 @@ function fxText(R, x, y, text, color, life = 1.2) { R.fx.push({ k: 'txt', x, y, 
 
 function updateFx(R, dt) {
   for (const f of R.fx) f.life -= dt;
+  // při vysoké rychlosti efekty zaniknou dřív, než je renderer uvidí – výbuchy si proto předáme zvlášť
+  for (const f of R.fx) if (f.life <= 0 && !f._r && (f.k === 'burst' || f.k === 'boom') && game.fxQ.length < 160) { f._r = true; game.fxQ.push(f); }
   if (R.fx.some(f => f.life <= 0)) R.fx = R.fx.filter(f => f.life > 0);
   if (R.hitFlash > 0) R.hitFlash -= dt;
 }

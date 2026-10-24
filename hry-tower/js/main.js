@@ -32,7 +32,7 @@ function startGame() {
     const now = performance.now();
     const dt = Math.min(5, (now - last) / 1000);
     last = now;
-    tick(dt);
+    tick(dt, 250);
   }, 1000);
 
   setInterval(() => {

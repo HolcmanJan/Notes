@@ -1,7 +1,7 @@
 'use strict';
 // ---------- vykreslování bojiště: PixiJS (WebGL) s efekty ----------
 // bloom záře, částice, otřes obrazovky, rázové vlny, animovaná čísla, záblesky zásahů
-const PX = { app: null, ok: false, last: performance.now(), frame: 0, shake: 0, parts: [], texts: [], shockwaves: [], banner: null, lastWave: 0, hitPrev: false, prevAtk: 0, towerPulse: 0, hudIcons: {} };
+const PX = { app: null, ok: false, last: performance.now(), frame: 0, shake: 0, parts: [], texts: [], shockwaves: [], banner: null, lastWave: 0, hitPrev: false, prevAtk: 0, towerPulse: 0, hudIcons: {}, born: new WeakMap(), prevPos: new WeakMap(), hurtA: 0, bloomKick: 0, meteors: [] };
 const MAX_PARTS = 1400;
 const hex = c => typeof c === 'number' ? c : parseInt(String(c).slice(1, 7), 16);
 
@@ -68,6 +68,11 @@ function buildTextures() {
     g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.4, 'rgba(255,255,255,0.6)'); g.addColorStop(1, 'rgba(255,255,255,0)');
     c.fillStyle = g; c.fillRect(0, 0, s, s);
   });
+  T.ring = canvasTex(128, (c, s) => {
+    const g = c.createRadialGradient(s / 2, s / 2, s * 0.3, s / 2, s / 2, s / 2);
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.75, 'rgba(255,255,255,0.9)'); g.addColorStop(0.85, 'rgba(255,255,255,0.5)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g; c.fillRect(0, 0, s, s);
+  });
   T.shard = shapeTex(g => g.beginFill(0xffffff).drawPolygon([0, -14, 9, 10, -9, 10]).endFill());
   T.diamond = shapeTex(g => g.beginFill(0xffffff, 0.35).lineStyle(5, 0xffffff).drawPolygon([0, -20, 14, 0, 0, 20, -14, 0]).endFill());
   T.vignette = canvasTex(256, (c, s) => {
@@ -130,7 +135,7 @@ function buildScene() {
   st.addChild(PX.bg, PX.world, PX.textLayer, PX.hud);
   PX.nebula = new PIXI.Sprite(PX.tex.nebula); PX.bg.addChild(PX.nebula);
   PX.starLayer = C(); PX.bg.addChild(PX.starLayer);
-  PX.stars = Array.from({ length: 110 }, () => {
+  PX.stars = Array.from({ length: 170 }, () => {
     const s = new PIXI.Sprite(PX.tex.dot); s.anchor.set(0.5); s.blendMode = PIXI.BLEND_MODES.ADD;
     s.fx = Math.random(); s.fy = Math.random(); s.base = Math.random() * 0.5 + 0.15; s.tw = Math.random() * 6.28; s.sz = Math.random() * 3 + 1.5;
     PX.starLayer.addChild(s); return s;
@@ -139,21 +144,29 @@ function buildScene() {
   PX.fieldG = new PIXI.Graphics(); W.addChild(PX.fieldG);
   PX.zoneLayer = C(); W.addChild(PX.zoneLayer);
   PX.mineLayer = C(); W.addChild(PX.mineLayer);
+  PX.haloLayer = C(); W.addChild(PX.haloLayer);
   PX.enemyLayer = C(); W.addChild(PX.enemyLayer);
   PX.enemyG = new PIXI.Graphics(); W.addChild(PX.enemyG);
+  PX.trailLayer = C(); W.addChild(PX.trailLayer);
   PX.bulletLayer = C(); W.addChild(PX.bulletLayer);
   PX.partLayer = C(); W.addChild(PX.partLayer);
+  PX.towerGlow = new PIXI.Sprite(PX.tex.dot); PX.towerGlow.anchor.set(0.5); PX.towerGlow.blendMode = PIXI.BLEND_MODES.ADD; W.addChild(PX.towerGlow);
   PX.topG = new PIXI.Graphics(); W.addChild(PX.topG);
   PX.pools = {
     zone: makePool(PX.zoneLayer, PX.tex.hole, false),
     zoneAdd: makePool(PX.zoneLayer, PX.tex.dot, true),
     mine: makePool(PX.mineLayer, PX.tex.dot, true),
+    halo: makePool(PX.haloLayer, PX.tex.dot, true),
     enemy: makePool(PX.enemyLayer, PX.tex.dot, false),
+    trail: makePool(PX.trailLayer, PX.tex.bolt, true),
     bullet: makePool(PX.bulletLayer, PX.tex.bolt, true),
     part: makePool(PX.partLayer, PX.tex.dot, true),
     shard: makePool(PX.partLayer, PX.tex.shard, false),
+    ring: makePool(PX.partLayer, PX.tex.ring, true),
+    meteor: makePool(PX.starLayer, PX.tex.bolt, true),
   };
   PX.vignette = new PIXI.Sprite(PX.tex.vignette); PX.hud.addChild(PX.vignette);
+  PX.hurt = new PIXI.Sprite(PX.tex.vignette); PX.hurt.tint = 0xff2040; PX.hurt.alpha = 0; PX.hud.addChild(PX.hurt);
   PX.hudG = new PIXI.Graphics(); PX.hud.addChild(PX.hudG);
   PX.bannerText = new PIXI.Text('', new PIXI.TextStyle({ fontFamily: 'Exo 2, sans-serif', fontSize: 30, fontWeight: '900', fill: '#ffffff', stroke: '#000000', strokeThickness: 4, letterSpacing: 3 }));
   PX.bannerText.anchor.set(0.5); PX.bannerText.resolution = 2; PX.hud.addChild(PX.bannerText);
@@ -181,13 +194,16 @@ function layoutScreen() {
   const w = game.cw, h = game.ch;
   PX.nebula.width = w; PX.nebula.height = h;
   PX.vignette.width = w; PX.vignette.height = h;
+  PX.hurt.width = w; PX.hurt.height = h;
   PX.bannerText.position.set(w / 2, h * 0.2);
   PX.pauseText.position.set(w / 2, h / 2 - 30);
 }
 
 // ---------- částice ----------
 function emit(x, y, o) {
-  const n = o.n || 8;
+  let n = o.n || 8;
+  // při plném zásobníku (vysoká rychlost hry) se počet částic ředí, ať efekty nezahltí snímek
+  if (PX.parts.length > MAX_PARTS * 0.5) n = Math.ceil(n / (PX.parts.length > MAX_PARTS * 0.8 ? 4 : 2));
   for (let i = 0; i < n; i++) {
     if (PX.parts.length >= MAX_PARTS) return;
     const a = o.angle !== undefined ? o.angle + rand(-(o.spread || Math.PI), o.spread || Math.PI) : rand(0, Math.PI * 2);
@@ -196,7 +212,7 @@ function emit(x, y, o) {
     PX.parts.push({
       x: x + (o.jitter ? rand(-o.jitter, o.jitter) : 0), y: y + (o.jitter ? rand(-o.jitter, o.jitter) : 0),
       vx: Math.cos(a) * sp + (o.vx || 0), vy: Math.sin(a) * sp + (o.vy || 0), life, max: life,
-      size: rand(o.size[0], o.size[1]), color: hex(o.color), drag: o.drag || 2, shard: !!o.shard, rot: rand(0, 6.28), vr: rand(-8, 8),
+      size: rand(o.size[0], o.size[1]), color: hex(o.color), drag: o.drag || 2, shard: !!o.shard, ring: !!o.ring, rot: rand(0, 6.28), vr: rand(-8, 8),
       streak: o.streak || 0, grow: o.grow || 0, gravity: o.gravity || 0, alpha: o.alpha || 1, pull: o.pull,
     });
   }
@@ -214,15 +230,16 @@ function updateParts(dt) {
   }
 }
 function drawParts() {
-  const pp = PX.pools.part, ps = PX.pools.shard;
+  const pp = PX.pools.part, ps = PX.pools.shard, pr = PX.pools.ring;
   for (const p of PX.parts) {
     const t = p.life / p.max;
-    const s = p.shard ? ps.get() : pp.get();
+    const s = p.ring ? pr.get() : p.shard ? ps.get() : pp.get();
     s.position.set(p.x, p.y);
     s.tint = p.color;
     s.alpha = p.alpha * Math.min(1, t * 1.6);
     const sz = p.size * (1 + p.grow * (1 - t));
-    if (p.shard) { s.rotation = p.rot; s.scale.set(sz / 28); }
+    if (p.ring) { s.rotation = 0; s.scale.set(sz / 64); s.alpha = p.alpha * t; }
+    else if (p.shard) { s.rotation = p.rot; s.scale.set(sz / 28); }
     else if (p.streak) {
       const v = Math.hypot(p.vx, p.vy);
       s.rotation = Math.atan2(p.vy, p.vx);
@@ -247,13 +264,15 @@ function onFx(R, f) {
       const big = f.big;
       emit(f.x, f.y, { n: big ? 40 : 9, color: f.color, speed: big ? [8, 34] : [6, 20], size: big ? [0.8, 1.8] : [0.5, 1.1], life: [0.35, big ? 1.1 : 0.6], shard: true, drag: 2.5 });
       emit(f.x, f.y, { n: big ? 30 : 6, color: f.color, speed: [4, big ? 28 : 14], size: [1.4, big ? 4.5 : 2.4], life: [0.2, 0.5], drag: 3 });
+      emit(f.x, f.y, { n: 1, color: f.color, speed: [0, 0], size: [f.r * 1.6, f.r * 1.6], life: [0.3, 0.3], grow: big ? 5 : 2.2, ring: true, alpha: 0.9 });
       if (f.gold) emit(f.x, f.y, { n: 6, color: 0xffd700, speed: [3, 9], size: [1, 1.8], life: [0.6, 1], gravity: -6, drag: 1.5 });
-      if (big) { shake(9); addShockwave(f.x, f.y, 26); emit(f.x, f.y, { n: 1, color: 0xffffff, speed: [0, 0], size: [18, 18], life: [0.25, 0.25], grow: 1.5 }); }
+      if (big) { shake(9); addShockwave(f.x, f.y, 26); PX.bloomKick = 1; emit(f.x, f.y, { n: 1, color: 0xffffff, speed: [0, 0], size: [18, 18], life: [0.25, 0.25], grow: 1.5 }); }
       break;
     }
     case 'boom':
       emit(f.x, f.y, { n: Math.min(26, 8 + f.r * 2), color: f.color, speed: [f.r * 2, f.r * 6], size: [1, 2.6], life: [0.2, 0.55], drag: 4 });
       emit(f.x, f.y, { n: 1, color: 0xffffff, speed: [0, 0], size: [f.r * 2.2, f.r * 2.2], life: [0.18, 0.18], grow: 0.6, alpha: 0.8 });
+      emit(f.x, f.y, { n: 1, color: f.color, speed: [0, 0], size: [f.r * 1.4, f.r * 1.4], life: [0.28, 0.28], grow: 1.6, ring: true, alpha: 0.8 });
       shake(f.r > 5 ? 2.5 : 1);
       break;
     case 'hit':
@@ -294,13 +313,23 @@ function render() {
     st.alpha = st.base * (0.6 + 0.4 * Math.sin(tm * 1.7 + st.tw));
     st.scale.set(st.sz / 64);
   }
+  PX.nebula.alpha = 0.85 + 0.15 * Math.sin(tm * 0.25);
+  // padající hvězdy
+  if (Math.random() < dt * 0.25 && PX.meteors.length < 3) { const a = rand(0.35, 0.7); PX.meteors.push({ x: rand(-0.1, 0.9) * w, y: rand(-0.1, 0.4) * h, vx: Math.cos(a) * 520, vy: Math.sin(a) * 520, life: 0.7, max: 0.7 }); }
   const G = PX.fieldG, EG = PX.enemyG, TG = PX.topG, HG = PX.hudG;
   G.clear(); EG.clear(); TG.clear(); HG.clear();
   for (const k in PX.pools) PX.pools[k].begin();
+  PX.meteors = PX.meteors.filter(m => (m.life -= dt) > 0);
+  for (const m of PX.meteors) {
+    m.x += m.vx * dt; m.y += m.vy * dt;
+    const sp = PX.pools.meteor.get(); sp.position.set(m.x, m.y); sp.rotation = Math.atan2(m.vy, m.vx);
+    sp.tint = 0xcfe0ff; sp.alpha = Math.sin(Math.PI * m.life / m.max) * 0.8; sp.scale.set(90 / 64, 2.2 / 64);
+  }
 
   if (!R) {
     for (const k in PX.pools) PX.pools[k].end();
     PX.parts.length = 0;
+    game.fxQ.length = 0;
     for (const t of PX.texts) { t.t.visible = false; PX.textFree.push(t.t); }
     PX.texts = [];
     PX.bannerText.text = ''; PX.pauseText.text = '';
@@ -317,14 +346,18 @@ function render() {
 
   // nové události
   for (const f of R.fx) if (!f._r) { f._r = true; onFx(R, f); }
-  if (R.hitFlash > 0 && !PX.hitPrev) { shake(3); emit(0, 0, { n: 12, color: 0xff4d6d, speed: [10, 24], size: [0.6, 1.2], life: [0.15, 0.35], streak: 0.05 }); }
+  if (game.fxQ.length) { for (const f of game.fxQ) onFx(R, f); game.fxQ.length = 0; }
+  if (R.hitFlash > 0 && !PX.hitPrev) { shake(3); PX.hurtA = 0.85; emit(0, 0, { n: 12, color: 0xff4d6d, speed: [10, 24], size: [0.6, 1.2], life: [0.15, 0.35], streak: 0.05 }); }
   PX.hitPrev = R.hitFlash > 0;
-  if (R.atkT < PX.prevAtk - 0.5) PX.towerPulse = 1;
+  if (R.atkT < PX.prevAtk - 0.5) {
+    PX.towerPulse = 1;
+    emit(0, 0, { n: 3, color: curSkin().color, speed: [14, 26], size: [0.4, 0.8], life: [0.08, 0.18], streak: 0.04, drag: 5 });
+  }
   PX.prevAtk = R.atkT;
   PX.towerPulse = Math.max(0, PX.towerPulse - dt * 8);
   for (const g of R.rings) if (!g._r && g.delay <= 0) {
     g._r = true;
-    if (g.k === 'nuke') { shake(12); addShockwave(0, 0, 40); }
+    if (g.k === 'nuke') { shake(12); addShockwave(0, 0, 40); PX.bloomKick = 1.6; }
     if (g.k === 'death') { shake(2); addShockwave(0, 0, 12); }
     if (g.k === 'shock' && g.max >= 60) addShockwave(0, 0, 30);
   }
@@ -417,12 +450,26 @@ function render() {
   const ET = PX.tex.enemy;
   for (const e of R.enemies) {
     const D = ENEMY_TYPES[e.type];
+    // náběh při objevení (pružné zvětšení + jiskry)
+    let born = PX.born.get(e);
+    if (born === undefined) {
+      born = now; PX.born.set(e, now);
+      emit(e.x, e.y, { n: D.boss ? 18 : 3, color: D.color, speed: [3, D.boss ? 16 : 8], size: [0.5, 1.1], life: [0.2, 0.45], drag: 3 });
+      if (D.boss) { emit(e.x, e.y, { n: 1, color: D.color, speed: [0, 0], size: [e.r * 2, e.r * 2], life: [0.6, 0.6], grow: 3, ring: true }); shake(4); }
+    }
+    const bk = Math.min(1, (now - born) / 260), pop = bk < 1 ? 1 - Math.pow(1 - bk, 3) * Math.cos(bk * 5) : 1;
+    const col = hex(D.color);
+    const big = D.boss || D.elite || D.fleet;
+    const hs = PX.pools.halo.get();
+    hs.position.set(e.x, e.y); hs.tint = col; hs.rotation = 0;
+    hs.alpha = (big ? 0.38 + 0.12 * Math.sin(tm * 4 + e.rot) : 0.14) * bk;
+    hs.scale.set(e.r * (big ? 4.2 : 2.6) * pop / 64);
     const sp = PX.pools.enemy.get(ET[e.type]);
     sp.position.set(e.x, e.y);
     sp.rotation = e.type === 'fast' ? Math.atan2(-e.y, -e.x) + Math.PI / 2 : e.rot;
-    sp.scale.set(e.r / 32);
+    sp.scale.set(e.r / 32 * pop);
     if (e.flash > 0) { e.flash -= dt; sp.tint = 0xffffff; }
-    else sp.tint = e.stun > 0 || e.netT > 0 ? 0xe0e8ff : hex(D.color);
+    else sp.tint = e.stun > 0 || e.netT > 0 ? 0xe0e8ff : col;
     sp.alpha = 1;
     if (e.type === 'protector') EG.lineStyle(px, 0x7fb2ff, 0.22 + 0.08 * Math.sin(tm * 3)).drawCircle(e.x, e.y, ENEMY_TYPES.protector.shield * S.protRadius).lineStyle(0);
     if (e.prot) EG.lineStyle(0.7 * px, 0x7fb2ff, 0.9).drawCircle(e.x, e.y, e.r + 0.8).lineStyle(0);
@@ -445,6 +492,17 @@ function render() {
     const a = b.t ? Math.atan2(b.t.y - b.y, b.t.x - b.x) : 0;
     sp.position.set(b.x, b.y); sp.rotation = a; sp.tint = bcol; sp.alpha = 1;
     sp.scale.set(3.2 / 64, 1.1 / 64);
+    // stopa od pozice z minulého snímku
+    const pv = PX.prevPos.get(b);
+    if (pv) {
+      const dx = b.x - pv[0], dy = b.y - pv[1], len = Math.min(7, Math.hypot(dx, dy));
+      if (len > 0.3) {
+        const ta = Math.atan2(dy, dx), tr = PX.pools.trail.get();
+        tr.position.set(b.x - Math.cos(ta) * len / 2, b.y - Math.sin(ta) * len / 2); tr.rotation = ta;
+        tr.tint = bcol; tr.alpha = 0.45; tr.scale.set((len + 1.5) / 64, 0.9 / 64);
+      }
+      pv[0] = b.x; pv[1] = b.y;
+    } else PX.prevPos.set(b, [b.x, b.y]);
   }
   for (const b of R.ebullets) {
     const sp = bp.get(); sp.position.set(b.x, b.y); sp.rotation = 0; sp.tint = hex(b.color); sp.alpha = 1;
@@ -474,6 +532,12 @@ function render() {
   const tc = hex(R.card.demonT > 0 ? '#ff3d3d' : R.golden > 0 ? '#ffd700' : R.hitFlash > 0 ? '#ff4d6d' : superActive(R) ? '#ffe45e' : skin.color);
   const pulse = 1 + PX.towerPulse * 0.08;
   const sh = skin.shape || 0;
+  PX.towerGlow.tint = tc;
+  PX.towerGlow.alpha = 0.16 + 0.1 * PX.towerPulse + 0.04 * Math.sin(tm * 3);
+  PX.towerGlow.scale.set(TOWER_R * (3.4 + PX.towerPulse * 0.6) / 64);
+  TG.lineStyle(0.8 * px, tc, 0.35);
+  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 - tm * 0.9; TG.moveTo(Math.cos(a) * (TOWER_R + 4.4), Math.sin(a) * (TOWER_R + 4.4)).arc(0, 0, TOWER_R + 4.4, a, a + 0.6); }
+  TG.lineStyle(0);
   if (R.golden > 0) { TG.beginFill(0xffd700, 0.12 + 0.05 * Math.sin(tm * 8)).drawCircle(0, 0, TOWER_R * 2.4).endFill(); if (Math.random() < dt * 20) emit(rand(-3, 3), rand(-3, 3), { n: 1, color: 0xffd700, speed: [1, 3], size: [0.6, 1], life: [0.5, 0.8], gravity: -5 }); }
   TG.beginFill(tc, 0.12);
   TG.lineStyle(2.6 * px, tc, 1);
@@ -545,6 +609,13 @@ function render() {
     if (PX.shockwaves.length !== before) applyFilters();
   }
   if (!!(PX.world.filters || []).includes(PX.bloom) !== !!(PX.bloom && save.glow)) applyFilters();
+
+  // ---- červený okraj při zásahu / nízkém zdraví, záblesk záře ----
+  PX.hurtA = Math.max(0, PX.hurtA - dt * 3);
+  const low = R.hp < S.maxHp * 0.25 ? 0.3 + 0.2 * Math.sin(tm * 6) : 0;
+  PX.hurt.alpha = Math.max(PX.hurtA, low);
+  PX.bloomKick = Math.max(0, PX.bloomKick - dt * 2.5);
+  if (PX.bloom) PX.bloom.bloomScale = 1.15 + PX.bloomKick * 0.9;
 
   // ---- HUD: ikony zbraní, banner vlny, pauza ----
   drawHud(R, w, h, dt);

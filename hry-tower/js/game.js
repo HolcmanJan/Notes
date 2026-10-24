@@ -2,6 +2,7 @@
 // ---------- herní engine (simulace runu) ----------
 const VIEW_R = 66, SPAWN_R = 80, TOWER_R = 3.2, STEP = 1 / 30, WALL_R = 8.5;
 const EBULLET_SPD = 25, MISSILE_SPD = 35;
+const ILM_MAX_SETS = 5, ILM_NEAR_R = 14; // vnitřní miny: max. nevybuchlých sad; poloměr „u věže“
 
 const game = { run: null, cv: null, ctx: null, cw: 0, ch: 0, dpr: 1, scale: 1, userPaused: false, stars: [], fxQ: [] };
 
@@ -1081,6 +1082,9 @@ function updateUW(R, dt) {
   }
   if (U.innerMines && uwReady(R, 'innerMines', U.innerMines.cd, dt)) {
     for (let i = 0; i < U.innerMines.qty; i++) R.ilms.push({ a: i * Math.PI * 2 / U.innerMines.qty, r: 7 + (i % 2) * 2, dmg: U.innerMines.dmg, charge: 0 });
+    // nevybuchlé sady se jinak hromadí donekonečna (ve vysokých vlnách tisíce min) – drží se jen posledních ILM_MAX_SETS
+    const extra = R.ilms.reduce((n, m) => n + (m.homing ? 0 : 1), 0) - U.innerMines.qty * ILM_MAX_SETS;
+    if (extra > 0) { let k = extra; R.ilms = R.ilms.filter(m => m.homing || k-- <= 0); }
     if (S.uniq.magneticHook) for (const e of R.enemies.filter(x => (x.boss || x.fleet) && Math.hypot(x.x, x.y) < S.range)) for (let i = 0; i < S.uniq.magneticHook; i++) R.ilms.push({ a: Math.atan2(e.y, e.x), r: Math.hypot(e.x, e.y), dmg: U.innerMines.dmg, charge: 0, homing: e });
   }
   // zlatá věž + zlaté kombo (UW+)
@@ -1182,6 +1186,8 @@ function updateUW(R, dt) {
 
   // vnitřní miny obíhají kolem věže
   const rot = 0.6 + labV('ilmRot') * 0.1;
+  // miny blízko věže stačí porovnávat jen s nepřáteli u věže
+  const near = R.ilms.length ? R.enemies.filter(e => !e.dead && Math.hypot(e.x, e.y) <= ILM_NEAR_R + e.r + 1.2) : null;
   for (const m of R.ilms) {
     if (m.homing) {
       const t = m.homing;
@@ -1192,7 +1198,7 @@ function updateUW(R, dt) {
     } else m.a += rot * dt;
     if (save.uwPlus.innerMines !== undefined) m.charge += 0.5 * (save.uwPlus.innerMines + 1) * dt;
     const mx = Math.cos(m.a) * m.r, my = Math.sin(m.a) * m.r;
-    for (const e of R.enemies) {
+    for (const e of m.r <= ILM_NEAR_R ? near : R.enemies) {
       if (e.dead || Math.hypot(e.x - mx, e.y - my) > e.r + 1.2) continue;
       m.dead = true;
       const rad = 3 + labV('ilmRadius');

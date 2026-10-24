@@ -588,6 +588,7 @@ Object.assign(ACTIONS, {
     save.modules = save.modules.filter(m => !list.includes(m));
     toast(`Rozbito ${list.length} modulů`); renderPage();
   },
+  'mod-merge-all': () => mergeAllModules(),
   'mod-lock': el => moduleAction('lock', +el.dataset.uid, el),
   'mod-reroll': el => moduleAction('reroll', +el.dataset.uid),
   'mod-merge': el => moduleAction('merge', +el.dataset.uid),

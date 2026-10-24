@@ -346,7 +346,7 @@ UI.pages.modules = {
       <h3>Nasazené</h3><div class="mod-list">${slots}</div>
       ${assist}
       <div class="sb-row"><h3>Inventář (${inv.length})</h3><select data-input="mod-filter"><option value="all">Vše</option>${Object.entries(MOD_TYPES).map(([k, v]) => `<option value="${k}" ${UI.modFilter === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select></div>
-      <button class="btn sm wide" data-act="mod-shatter-commons">Rozbít všechny běžné moduly</button>
+      <div class="row-btns"><button class="btn sm gem" data-act="mod-merge-all">Sloučit vše</button><button class="btn sm" data-act="mod-shatter-commons">Rozbít všechny běžné moduly</button></div>
       <div class="mod-list">${inv.map(m => moduleHtml(m, false)).join('') || '<p class="muted">Prázdno</p>'}</div>`;
   },
 };
@@ -382,6 +382,29 @@ function moduleAction(act, uid, el) {
     toast(`Sloučeno: ${modName(m)} → ${MOD_RARITIES[m.rarity].name}`, 'good');
   }
   markDirty(); renderPage();
+}
+
+// opakovaně slučuje, dokud jde něco sloučit; za základ bere přednostně nasazené, oblíbené a vyšší rarity
+function mergeAllModules() {
+  let n = 0;
+  for (let guard = 0; guard < 10000; guard++) {
+    const eqIds = new Set(Object.values(save.modEquip));
+    const prio = m => (eqIds.has(m.uid) ? 2 : 0) + (m.fav ? 1 : 0);
+    const bases = save.modules.slice().sort((a, b) => prio(b) - prio(a) || b.rarity - a.rarity);
+    let done = false;
+    for (const m of bases) {
+      const mr = mergeRecipe(m);
+      if (!mr || !mr.ok) continue;
+      save.modules = save.modules.filter(x => !mr.mats.includes(x));
+      m.rarity = mr.rec[4];
+      n++; done = true;
+      break;
+    }
+    if (!done) break;
+  }
+  toast(n ? `Sloučeno ${n}×` : 'Nic ke sloučení', n ? 'good' : undefined);
+  if (n) markDirty();
+  renderPage();
 }
 
 // ===== Více =====

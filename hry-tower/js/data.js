@@ -13,8 +13,8 @@ const F = {
   cash: v => '$' + fmt(v),
 };
 
-const MAX_SPEED = 8;
-const SPEEDS = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8];
+const MAX_SPEED = 50;
+const SPEEDS = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 25, 30, 40, 50];
 const WAVE_SPAWN = 26, WAVE_COOLDOWN = 9; // délka vlny a pauza mezi vlnami (s)
 
 // Pozdní exponenciální růst, aby statistiky stíhaly nepřátele na vysokých vlnách

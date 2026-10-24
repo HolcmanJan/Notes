@@ -129,8 +129,9 @@ function tick(realDt, budgetMs = 10) {
   let gdt = want + (R.simDebt || 0);
   const t0 = performance.now();
   let done = 0;
+  const stepLen = R.speed >= 100 ? STEP * 1.5 : STEP; // od 100× delší krok = o třetinu méně výpočtů
   while (gdt > 1e-6 && !R.over && !R.paused) {
-    const d = Math.min(STEP, gdt);
+    const d = Math.min(stepLen, gdt);
     step(R, d);
     gdt -= d; done += d;
     if (performance.now() - t0 > budgetMs) break;

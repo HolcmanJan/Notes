@@ -3,6 +3,10 @@
 // bloom záře, částice, otřes obrazovky, rázové vlny, animovaná čísla, záblesky zásahů
 const PX = { app: null, ok: false, last: performance.now(), frame: 0, shake: 0, parts: [], texts: [], shockwaves: [], banner: null, lastWave: 0, hitPrev: false, prevAtk: 0, towerPulse: 0, hudIcons: {}, born: new WeakMap(), prevPos: new WeakMap(), hurtA: 0, bloomKick: 0, meteors: [] };
 const MAX_PARTS = 1400;
+// od 100× se šetří grafika: bez bloomu a rázových vln, méně částic, vykresluje se jen každý 2. snímek (main.js)
+const LITE_SPEED = 100;
+const liteFx = () => !!game.run && game.run.speed >= LITE_SPEED;
+const glowOn = () => !!PX.bloom && save.glow && !liteFx();
 const hex = c => typeof c === 'number' ? c : parseInt(String(c).slice(1, 7), 16);
 
 function initCanvas(cv) {
@@ -184,7 +188,7 @@ function buildScene() {
 
 function applyFilters() {
   const f = [];
-  if (PX.bloom && save.glow) f.push(PX.bloom);
+  if (glowOn()) f.push(PX.bloom);
   for (const s of PX.shockwaves) f.push(s.f);
   PX.world.filters = f.length ? f : null;
   PX.world.filterArea = f.length ? PX.app.screen : null;
@@ -203,7 +207,8 @@ function layoutScreen() {
 function emit(x, y, o) {
   let n = o.n || 8;
   // při plném zásobníku (vysoká rychlost hry) se počet částic ředí, ať efekty nezahltí snímek
-  if (PX.parts.length > MAX_PARTS * 0.5) n = Math.ceil(n / (PX.parts.length > MAX_PARTS * 0.8 ? 4 : 2));
+  if (liteFx()) n = Math.ceil(n / 3);
+  else if (PX.parts.length > MAX_PARTS * 0.5) n = Math.ceil(n / (PX.parts.length > MAX_PARTS * 0.8 ? 4 : 2));
   for (let i = 0; i < n; i++) {
     if (PX.parts.length >= MAX_PARTS) return;
     const a = o.angle !== undefined ? o.angle + rand(-(o.spread || Math.PI), o.spread || Math.PI) : rand(0, Math.PI * 2);
@@ -250,7 +255,7 @@ function drawParts() {
 
 function shake(a) { PX.shake = Math.min(14, PX.shake + a); }
 function addShockwave(x, y, amp = 22) {
-  if (!PIXI.filters || !PIXI.filters.ShockwaveFilter || PX.shockwaves.length >= 3) return;
+  if (!PIXI.filters || !PIXI.filters.ShockwaveFilter || PX.shockwaves.length >= 3 || liteFx()) return;
   const sx = game.cw / 2 + x * game.scale, sy = game.ch / 2 + y * game.scale;
   const f = new PIXI.filters.ShockwaveFilter([sx, sy], { amplitude: amp, wavelength: 110, speed: 520, brightness: 1.15, radius: Math.max(game.cw, game.ch) }, 0);
   PX.shockwaves.push({ f, t: 0 });
@@ -608,7 +613,7 @@ function render() {
     PX.shockwaves = PX.shockwaves.filter(sw => sw.t < 1.3);
     if (PX.shockwaves.length !== before) applyFilters();
   }
-  if (!!(PX.world.filters || []).includes(PX.bloom) !== !!(PX.bloom && save.glow)) applyFilters();
+  if (!!(PX.world.filters || []).includes(PX.bloom) !== glowOn()) applyFilters();
 
   // ---- červený okraj při zásahu / nízkém zdraví, záblesk záře ----
   PX.hurtA = Math.max(0, PX.hurtA - dt * 3);

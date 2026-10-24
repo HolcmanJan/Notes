@@ -16,12 +16,15 @@ function startGame() {
   refreshGuild();
   initUI();
 
-  let last = performance.now();
+  let last = performance.now(), frameN = 0;
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000);
     last = now;
-    tick(dt);
-    if (UI.page === 'battle') render();
+    // od LITE_SPEED se vykresluje jen každý 2. snímek a ušetřený čas dostane simulace
+    const draw = UI.page === 'battle' && (!liteFx() || (frameN++ & 1) === 0);
+    // rozpočet simulace ~75 % délky snímku (bez vykreslení 90 %) – raději klesne fps, než aby hra zpomalila
+    tick(dt, clamp(dt * (draw ? 750 : 900), 10, 45));
+    if (draw) render();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

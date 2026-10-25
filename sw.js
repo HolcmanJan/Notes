@@ -1,6 +1,6 @@
 // Service worker: síť má přednost (vždy čerstvá verze), cache slouží jako offline záloha.
 // Při slabém signálu se po NETWORK_TIMEOUT_MS použije verze z cache a síť ji dotáhne na pozadí.
-const CACHE = "moje-aplikace-v3";
+const CACHE = "moje-aplikace-v4";
 const NETWORK_TIMEOUT_MS = 4000;
 const PRECACHE = [
     "./", "index.html", "recepty.html", "rozpocet.html", "cviceni.html", "palivo.html", "zalozky.html",
@@ -11,6 +11,8 @@ const PRECACHE = [
     "hry-tower/index.html", "hry-tower/css/style.css", "hry-tower/js/lib/pixi.min.js", "hry-tower/js/lib/pixi-filters.js",
     ...["util", "wikidata", "data", "state", "game", "render2d", "render", "icons", "ui", "pages", "more", "main", "cloud"]
         .map((f) => `hry-tower/js/${f}.js`),
+    "hry-kasino/index.html", "hry-kasino/css/style.css",
+    ...["logic", "render", "ui"].map((f) => `hry-kasino/js/${f}.js`),
 ];
 
 self.addEventListener("install", (event) => {

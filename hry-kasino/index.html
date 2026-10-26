@@ -3,71 +3,71 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <title>Jackpot Tower</title>
-  <meta name="theme-color" content="#0b2a1f">
+  <title>Sloty &amp; Plenky</title>
+  <meta name="theme-color" content="#1a0b24">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Limelight&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <div id="app">
+  <div id="app" class="carpet-carpetGreen diaper-diaperWhite">
     <header id="top">
       <a href="../hry.html" class="back" aria-label="Zpět na hry">←</a>
-      <div class="cur gold" title="Zlaťáky – trvalá vylepšení v dílně">🪙 <b id="c-gold">0</b></div>
-      <div class="cur gem" title="Diamanty – talismany v herně">💎 <b id="c-gems">0</b></div>
-      <div class="page-title" id="page-title">Stůl</div>
+      <div class="cur chips" title="Žetony">🪙 <b id="c-chips">0</b></div>
+      <div class="cur poop" title="Craptoměna">💩 <b id="c-poop">0</b></div>
+      <div class="cur ram" id="cur-ram" title="RAM – permanentní měna" hidden>💾 <b id="c-ram">0</b></div>
     </header>
 
     <main id="screen">
-      <section id="page-battle" class="page">
-        <div id="stage">
-          <canvas id="cv"></canvas>
-          <div id="hud">
-            <div class="hud-l">
-              <div class="wave">Vlna <b id="h-wave">1</b></div>
-              <div class="wave-bar"><i id="h-wavebar"></i></div>
-              <div class="table-name" id="h-table"></div>
-            </div>
-            <div class="hud-cash">$<b id="h-cash">0</b></div>
-          </div>
-          <div id="hud-btns">
-            <button id="b-speed" data-act="speed">×1</button>
-            <button id="b-pause" data-act="pause">❚❚</button>
-            <button id="b-roulette" data-act="roulette" title="Ruleta">🎡</button>
-            <button id="b-perk" data-act="perk" class="pulse" hidden>🃏</button>
-          </div>
-          <div id="start" hidden></div>
+      <section id="page-floor" class="page">
+        <div id="marquee">
+          <div class="title deco">Sloty <span>&amp;</span> Plenky</div>
+          <div class="rate"><b id="h-rate">0</b> / s</div>
         </div>
-        <div id="status">
-          <div class="hp"><i id="h-hpbar"></i><span id="h-hp"></span></div>
-          <div class="slot-line"><span id="h-slot">🎰 Automat se brzy zatočí</span><span class="slot-cd"><i id="h-slotcd"></i></span></div>
+        <div id="floor-bar">
+          <button id="b-remodel" data-act="remodel" class="chip-btn">🔧 Přestavba</button>
+          <button id="b-wake" data-act="wakeAll" class="chip-btn" hidden>⏰ Probudit <b id="h-sleep">0</b></button>
+          <button id="b-boost" data-act="boost" class="chip-btn" hidden>⏩ Zrychlit</button>
+          <button id="b-reboot" data-act="rebootSheet" class="chip-btn reboot" hidden>💾 Reboot</button>
         </div>
-        <div id="run-panel">
-          <div class="tabs" id="run-tabs"></div>
-          <div class="panel-tools">
-            <button class="risk" id="b-risk" data-act="risk">🎲 Riskni: <b>vyp</b></button>
-            <div class="bulk" id="run-bulk"></div>
-          </div>
-          <div class="grid" id="run-grid"></div>
+        <button id="allin" data-act="allInSheet" hidden>
+          <span class="allin-glow"></span>
+          <span class="deco">ALL IN</span>
+          <small>Speciální automat se objevil…</small>
+        </button>
+        <div id="floor-wrap">
+          <div id="floor"></div>
+          <div id="fx"></div>
         </div>
+        <div id="remodel-bar" hidden>
+          <span id="remodel-text">Vyber automat, který chceš přesunout.</span>
+          <button data-act="sellSel" id="b-sell" class="chip-btn danger" hidden>Prodat</button>
+          <button data-act="remodel" class="chip-btn">Hotovo</button>
+        </div>
+        <p class="hint" id="floor-hint"></p>
       </section>
-
-      <section id="page-ws" class="page scroll" hidden></section>
-      <section id="page-herna" class="page scroll" hidden></section>
-      <section id="page-stats" class="page scroll" hidden></section>
+      <section id="page-machines" class="page" hidden></section>
+      <section id="page-gamblers" class="page" hidden></section>
+      <section id="page-crapto" class="page" hidden></section>
+      <section id="page-tree" class="page" hidden></section>
+      <section id="page-ach" class="page" hidden></section>
+      <section id="page-more" class="page" hidden></section>
     </main>
 
     <nav id="nav">
-      <button data-page="battle" class="on"><span>🎰</span>Stůl</button>
-      <button data-page="ws"><span>🛠️</span>Dílna</button>
-      <button data-page="herna"><span>💎</span>Herna</button>
-      <button data-page="stats"><span>🏆</span>Rekordy</button>
+      <button data-page="floor" class="on"><i>🎰</i><span>Podlaha</span></button>
+      <button data-page="machines"><i>⚙️</i><span>Stroje</span></button>
+      <button data-page="gamblers"><i>👶</i><span>Hráči</span></button>
+      <button data-page="crapto"><i>💩</i><span>Crapto</span></button>
+      <button data-page="tree"><i>💾</i><span>RAM</span></button>
+      <button data-page="ach"><i>🏆</i><span>Úspěchy</span></button>
+      <button data-page="more"><i>⋯</i><span>Více</span></button>
     </nav>
-    <div id="modal-root"></div>
+
+    <div id="sheet-root"></div>
     <div id="toasts"></div>
+    <div id="ending" hidden></div>
   </div>
-  <script src="js/logic.js"></script>
-  <script src="js/render.js"></script>
-  <script src="js/ui.js"></script>
+  <script type="module" src="js/ui.js"></script>
 </body>
 </html>

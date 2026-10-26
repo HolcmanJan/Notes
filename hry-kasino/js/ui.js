@@ -1,494 +1,843 @@
-'use strict';
-// ---------- uživatelské rozhraní ----------
-const $ = id => document.getElementById(id);
-const UI = { page: 'battle', cat: 'atk', wsCat: 'atk', bulk: 1, tier: 1, overShown: false, modalOpen: false, perkOpen: false };
-const BULKS = [1, 5, 'max'];
-const UNLOCK_NAMES = { range: 'Dosah', multi: 'Rozhoz', bounce: 'Odraz', def: 'Obrana', thorns: 'Trny', knock: 'Odhození', life: 'Lifesteal', gold: 'Zlaťáky', bank: 'Úrok', free: 'Vylepšení zdarma', roulette: 'Krupiérova přízeň' };
-const PAGE_TITLES = { battle: 'Stůl', ws: 'Dílna', herna: 'Herna', stats: 'Rekordy' };
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Sloty & Plenky – vykreslování, ovládání a hlavní smyčka.
+import * as L from "./logic.js";
+import {
+    FLOOR_SLOTS, REBOOT_AT, DIGITAL_COST, ALLIN_AT, MACHINES, MACH, MACHINE_UPGRADES, CURSOR_UPGRADES,
+    GAMBLER_UPGRADES, GAMBLER_BASE, PERMA, PERMA_BY_ID, CRAPTO_BETS, CRAPTO_SYMBOLS, CRAPTO_LINES, CRAPTO_TIERS,
+    ACHIEVEMENTS, ACH_BONUS, COSMETICS, ENDING_LINES,
+} from "./data.js";
 
-function toast(text, kind = '') {
-  const el = document.createElement('div');
-  el.className = 'toast ' + kind;
-  el.textContent = text;
-  $('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 2500);
-}
+const $ = (id) => document.getElementById(id);
+const fmt = L.fmt;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const SYM = Object.fromEntries(CRAPTO_SYMBOLS.map((s) => [s.id, s.icon]));
+const CARPET_SWATCH = { carpetGreen: "#0f3b2b", carpetRed: "#4a0f1c", carpetNeon: "#120f3d", carpetGold: "#4a3410" };
+const DIAPER_SWATCH = { diaperWhite: "#f5f5f5", diaperPink: "#ff9cc7", diaperCamo: "#6f7d3c", diaperGold: "#ffc44d" };
 
-function modal(html, { closable = true, onClose } = {}) {
-  closeModal();
-  const root = $('modal-root');
-  root.innerHTML = `<div class="back-drop"><div class="modal">${html}</div></div>`;
-  UI.modalOpen = true;
-  game.modalPause = true;
-  UI.onClose = onClose;
-  if (closable) root.firstChild.addEventListener('click', e => { if (e.target === root.firstChild && !RL.spinning) closeModal(); });
-  return root.querySelector('.modal');
-}
-function closeModal() {
-  const root = $('modal-root');
-  if (!root.firstChild) return;
-  root.innerHTML = '';
-  UI.modalOpen = false;
-  UI.perkOpen = false;
-  game.modalPause = false;
-  const cb = UI.onClose; UI.onClose = null;
-  if (cb) cb();
-}
+let S = load();
+let page = "floor";
+let remodel = false, selSlot = -1;
+let pointer = null;              // poloha kurzoru/prstu v rámci #floor-wrap
+let pageSig = "";
+let crapto = { anim: null, last: null, auto: false, wait: 0 };
+const tiles = [], tileKeys = [], tileRefs = [];
+const dropEls = new Map();
+const dropXY = new Map();         // id kapky → poloha v pixelech na podlaze
+const rate = { buckets: [0, 0, 0, 0, 0], acc: 0, t: 0 };
 
-// ---------- navigace ----------
-function showPage(p) {
-  UI.page = p;
-  for (const b of document.querySelectorAll('#nav button')) b.classList.toggle('on', b.dataset.page === p);
-  for (const id of ['battle', 'ws', 'herna', 'stats']) $('page-' + id).hidden = id !== p;
-  $('page-title').textContent = PAGE_TITLES[p];
-  if (p === 'ws') renderWs();
-  if (p === 'herna') renderHerna();
-  if (p === 'stats') renderStats();
-  if (p === 'battle') { buildRunGrid(); updateStart(); }
+// ---------- ukládání ----------
+function load() {
+    try {
+        const raw = localStorage.getItem(L.SAVE_KEY);
+        if (raw) return L.deserialize(raw);
+    } catch { /* prohlížeč bez úložiště */ }
+    return L.newState();
+}
+function save() {
+    try { localStorage.setItem(L.SAVE_KEY, L.serialize(S)); } catch { /* nevadí */ }
 }
 
-function updateTop() {
-  $('c-gold').textContent = fmt(Math.floor(save.gold));
-  $('c-gems').textContent = fmt(save.gems);
+// ---------- podlaha ----------
+const wrap = $("floor-wrap"), floorEl = $("floor"), fx = $("fx");
+for (let i = 0; i < FLOOR_SLOTS; i++) {
+    const t = document.createElement("div");
+    t.className = "tile";
+    t.dataset.slot = i;
+    floorEl.appendChild(t);
+    tiles.push(t);
+}
+const ring = document.createElement("div");
+ring.className = "cursor-ring";
+ring.hidden = true;
+fx.appendChild(ring);
+
+function gamblerState(g) {
+    if (!g) return "";
+    return g.whale ? "whale" : g.sleep ? "sleep" : g.boost > 0 ? "boost" : "awake";
 }
 
-// ---------- bitva: start ----------
-function updateStart() {
-  const el = $('start');
-  const show = !game.run;
-  el.hidden = !show;
-  for (const id of ['run-panel', 'status', 'hud', 'hud-btns']) $(id).hidden = show;
-  if (!show) return;
-  UI.tier = clamp(UI.tier || save.tier, 1, save.maxTier);
-  const T = TIERS[UI.tier - 1];
-  const best = save.best[UI.tier] || 0;
-  const next = UI.tier === save.maxTier && save.maxTier < TIERS.length ? `<div class="d">Vlna ${TIER_UNLOCK_WAVE} odemkne ${TIERS[UI.tier].name}</div>` : '';
-  el.innerHTML = `
-    <h1>Jackpot<br>Tower</h1>
-    <div class="sub">Automat uprostřed stolu hází žetony po kostkách, kartách a krupiérech. Přežij co nejvíc vln, točí se samo — štěstí přeje připraveným.</div>
-    <div class="tier-pick">
-      <button data-act="tier" data-d="-1" ${UI.tier <= 1 ? 'disabled' : ''}>‹</button>
-      <div class="tier-card"><div class="d">Stůl ${UI.tier}</div><div class="n">${T.name}</div>
-        <div class="d">Nejlepší vlna: ${best} · zlaťáky ×${T.gold}</div>${next}</div>
-      <button data-act="tier" data-d="1" ${UI.tier >= save.maxTier ? 'disabled' : ''}>›</button>
-    </div>
-    <button class="btn big gold" data-act="play">Rozdat a hrát</button>`;
+function renderTile(i) {
+    const run = S.run, t = tiles[i], m = run.floor[i];
+    let key, cls, html = "";
+    if (i >= run.slots) {
+        const next = i === run.slots;
+        const cost = L.expansionCost(S);
+        const can = S.chips >= cost;
+        key = `l:${next}:${next ? cost : 0}:${next && can}`;
+        cls = "tile locked" + (next ? " next" : "") + (next && !can ? " cant" : "");
+        html = next ? `🔒<small>🪙 ${fmt(cost)}</small>` : "🔒";
+    } else if (!m) {
+        key = `e:${selSlot >= 0}`;
+        cls = "tile empty";
+        html = remodel ? "" : `+<small>Automat</small>`;
+    } else {
+        const g = L.gamblerAt(S, i), gs = gamblerState(g), d = MACH[m.t];
+        key = `m:${m.t}:${gs}:${selSlot === i}`;
+        cls = `tile machine m-${m.t}` + (selSlot === i ? " sel" : "") + (gs === "sleep" ? " has-sleeper" : "");
+        const face = gs === "whale" ? "🐋" : gs === "sleep" ? "😴" : gs === "boost" ? "🤪" : "👶";
+        html = `<div class="screen"><span>${d.icon}</span></div><div class="bar"><i></i></div><div class="name">${d.short}</div>`
+            + (g ? `<div class="gam ${gs}">${face}</div>` : "");
+    }
+    if (tileKeys[i] === key) return;
+    tileKeys[i] = key;
+    t.className = cls;
+    t.innerHTML = html;
+    tileRefs[i] = m ? { span: t.querySelector(".screen span"), bar: t.querySelector(".bar i"), shown: MACH[m.t].icon, spin: false, flip: 0 } : null;
 }
 
-function newRun() {
-  save.tier = UI.tier;
-  startRun(UI.tier);
-  UI.overShown = false;
-  writeSave();
-  updateStart();
-  buildRunGrid();
+function renderFloor() {
+    for (let i = 0; i < FLOOR_SLOTS; i++) renderTile(i);
+    floorEl.classList.toggle("remodel", remodel);
 }
 
-// ---------- bitva: panel vylepšení ----------
-function buildRunTabs() {
-  $('run-tabs').innerHTML = CATS.map(c => `<button data-act="cat" data-cat="${c.id}" style="--c:${c.color}" class="${c.id === UI.cat ? 'on' : ''}">${c.name}</button>`).join('');
-  $('run-bulk').innerHTML = BULKS.map(b => `<button data-act="bulk" data-b="${b}" class="${b === UI.bulk ? 'on' : ''}">${b === 'max' ? 'Max' : '×' + b}</button>`).join('');
-}
-function buildRunGrid() {
-  buildRunTabs();
-  const col = CATS.find(c => c.id === UI.cat).color;
-  $('run-grid').innerHTML = STATS.filter(d => d.cat === UI.cat).map(d =>
-    `<button class="upg" id="u-${d.id}" data-act="buy" data-id="${d.id}" style="--c:${col}">
-      <span class="nm">${d.name}</span>
-      <span class="row"><span class="v"></span><span class="cost"></span></span>
-    </button>`).join('');
-  updateRunGrid();
-}
-function updateRunGrid() {
-  const R = game.run;
-  if (!R) return;
-  for (const d of STATS) {
-    if (d.cat !== UI.cat) continue;
-    const el = $('u-' + d.id);
-    if (!el) continue;
-    const locked = !isUnlocked(d), max = atMax(d.id, R);
-    const c = cashCost(d, R);
-    el.classList.toggle('locked', locked);
-    el.classList.toggle('max', !locked && max);
-    el.classList.toggle('no', !locked && !max && R.cash < c);
-    el.querySelector('.v').textContent = locked ? '🔒' : d.fmt(d.f(statLevel(d.id, R)));
-    el.querySelector('.cost').textContent = locked ? 'v dílně' : max ? 'MAX' : '$' + fmt(c);
-  }
-  const rb = $('b-risk');
-  rb.classList.toggle('on', R.risk);
-  rb.querySelector('b').textContent = R.risk ? 'zap' : 'vyp';
-}
-function buyRunUI(id) {
-  const R = game.run;
-  if (!R || R.over) return;
-  const d = STAT_MAP[id];
-  if (!isUnlocked(d)) { toast(`Odemkni ${UNLOCK_NAMES[d.unlock[0]]} v dílně za ${fmt(d.unlock[1])} 🪙`); return; }
-  const n = UI.bulk === 'max' ? 999 : UI.bulk;
-  let bought = 0, won = 0, lost = 0, roll = 0;
-  for (let i = 0; i < n; i++) {
-    const r = buyRun(R, id);
-    if (!r) break;
-    bought++;
-    roll = r.roll;
-    if (R.risk) { if (r.gain) won++; else lost++; }
-  }
-  if (R.risk && bought) {
-    const face = '⚀⚁⚂⚃⚄⚅'[roll - 1];
-    if (bought === 1) toast(won ? `${face} Padla ${roll} – výhra! ${d.name} +2` : `${face} Padla ${roll} – smůla, ${d.name} bez zlepšení`, won ? 'good' : 'bad');
-    else toast(`🎲 ${d.name}: ${won}× výhra (+${won * 2}), ${lost}× prohra`, won >= lost ? 'good' : 'bad');
-  }
-  updateRunGrid();
+function animateTiles(now) {
+    const run = S.run;
+    for (let i = 0; i < run.slots; i++) {
+        const m = run.floor[i], ref = tileRefs[i];
+        if (!m || !ref) continue;
+        const spinning = m.spin > 0;
+        if (spinning !== ref.spin) { ref.spin = spinning; tiles[i].classList.toggle("spinning", spinning); }
+        if (spinning) {
+            ref.bar.style.width = (100 * (1 - m.spin / m.dur)).toFixed(1) + "%";
+            if (now - ref.flip > 90) {
+                ref.flip = now;
+                const reel = MACH[m.t].reel;
+                ref.span.textContent = reel[Math.floor(Math.random() * reel.length)];
+                ref.shown = "";
+            }
+        } else if (ref.shown !== MACH[m.t].icon) {
+            ref.shown = MACH[m.t].icon;
+            ref.span.textContent = ref.shown;
+            ref.bar.style.width = "0";
+        }
+    }
 }
 
-// ---------- bitva: HUD ----------
+function slotCenter(slot, fx_ = 0.5, fy = 0.4) {
+    const t = tiles[slot];
+    return { x: t.offsetLeft + fx_ * t.offsetWidth, y: t.offsetTop + fy * t.offsetHeight };
+}
+
+function floatText(slot, text, cls = "") {
+    if (page !== "floor" || fx.childElementCount > 45) return;
+    const p = slotCenter(slot, 0.3 + Math.random() * 0.4, 0.35);
+    const el = document.createElement("div");
+    el.className = "float " + cls;
+    el.textContent = text;
+    el.style.left = p.x + "px";
+    el.style.top = p.y + "px";
+    el.addEventListener("animationend", () => el.remove());
+    fx.appendChild(el);
+}
+
+function syncDrops() {
+    const alive = new Set();
+    for (const d of S.run.drops) {
+        alive.add(d.id);
+        let el = dropEls.get(d.id);
+        if (!el) {
+            el = document.createElement("div");
+            el.className = "drop " + d.k;
+            el.dataset.drop = d.id;
+            el.textContent = d.k === "ram" ? "💾" : "💩";
+            const p = dropPos(d);
+            el.style.left = p.x + "px";
+            el.style.top = p.y + "px";
+            fx.appendChild(el);
+            dropEls.set(d.id, el);
+        }
+        if (d.k === "poop") el.classList.toggle("fade", d.t > 20);
+    }
+    for (const [id, el] of dropEls) {
+        if (alive.has(id)) continue;
+        dropEls.delete(id);
+        dropXY.delete(id);
+        if (el.dataset.collected) {
+            el.classList.add("gone");
+            setTimeout(() => el.remove(), 360);
+        } else el.remove();
+    }
+}
+
+function dropPos(d) {
+    let p = dropXY.get(d.id);
+    if (!p) { p = slotCenter(d.s, d.x, d.y); dropXY.set(d.id, p); }
+    return p;
+}
+
+function pointerWork() {
+    const sticky = L.cursorLevel(S, "sticky") > 0;
+    ring.hidden = !(pointer && sticky && page === "floor");
+    if (!pointer || page !== "floor") return;
+    const radius = 24 + 22 * L.cursorLevel(S, "wide");
+    if (sticky) {
+        ring.style.left = pointer.x + "px";
+        ring.style.top = pointer.y + "px";
+        ring.style.width = ring.style.height = radius * 2 + "px";
+        for (const d of [...S.run.drops]) {
+            const p = dropPos(d);
+            if (Math.hypot(p.x - pointer.x, p.y - pointer.y) <= radius) collect(d.id);
+        }
+    }
+    if (!remodel && L.cursorLevel(S, "hover") > 0) {
+        const slot = slotAt(pointer.x, pointer.y);
+        if (slot >= 0 && S.run.floor[slot]) {
+            const g = L.gamblerAt(S, slot);
+            if (!(g && g.sleep)) L.spinMachine(S, slot, "c");
+        }
+    }
+}
+
+function slotAt(x, y) {
+    for (let i = 0; i < S.run.slots; i++) {
+        const t = tiles[i];
+        if (x >= t.offsetLeft && x <= t.offsetLeft + t.offsetWidth && y >= t.offsetTop && y <= t.offsetTop + t.offsetHeight) return i;
+    }
+    return -1;
+}
+
+function clearDrops() {
+    for (const el of dropEls.values()) el.remove();
+    dropEls.clear();
+    dropXY.clear();
+}
+
+function collect(id) {
+    const el = dropEls.get(id);
+    if (el) el.dataset.collected = "1";
+    L.collectDrop(S, id);
+}
+
+function localPoint(e) {
+    const r = wrap.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+wrap.addEventListener("pointerdown", (e) => {
+    pointer = localPoint(e);
+    const dropEl = e.target.closest(".drop");
+    if (dropEl) { collect(+dropEl.dataset.drop); return; }
+    const tile = e.target.closest(".tile");
+    if (tile) tapTile(+tile.dataset.slot);
+});
+wrap.addEventListener("pointermove", (e) => { pointer = localPoint(e); });
+wrap.addEventListener("pointerup", (e) => { if (e.pointerType !== "mouse") pointer = null; });
+wrap.addEventListener("pointerleave", () => { pointer = null; });
+wrap.addEventListener("pointercancel", () => { pointer = null; });
+
+function tapTile(i) {
+    const run = S.run, m = run.floor[i];
+    if (remodel) {
+        if (i >= run.slots) return;
+        if (selSlot < 0) { if (m) selSlot = i; }
+        else if (selSlot === i) selSlot = -1;
+        else { L.moveMachine(S, selSlot, i); selSlot = -1; }
+        updateRemodelBar();
+        renderFloor();
+        return;
+    }
+    if (i >= run.slots) {
+        if (i === run.slots) {
+            if (L.buyExpansion(S)) { toast("🏗️ Podlaha rozšířena", `${run.slots} / ${FLOOR_SLOTS} míst`); renderFloor(); }
+            else toast("Na rozšíření chybí žetony", `Potřebuješ 🪙 ${fmt(L.expansionCost(S))}`);
+        }
+        return;
+    }
+    if (!m) { openBuySheet(i); return; }
+    if (L.wakeAt(S, i)) { floatText(i, "Vstávat! ⏰"); renderTile(i); return; }
+    L.spinMachine(S, i, "c");
+}
+
+function updateRemodelBar() {
+    $("remodel-bar").hidden = !remodel;
+    $("b-remodel").classList.toggle("on", remodel);
+    const sell = $("b-sell");
+    if (selSlot >= 0 && S.run.floor[selSlot]) {
+        $("remodel-text").textContent = "Klepni na cílové místo (prohodí se).";
+        sell.hidden = false;
+        sell.textContent = `Prodat (+${fmt(L.sellValue(S, selSlot))})`;
+    } else {
+        $("remodel-text").textContent = "Vyber automat, který chceš přesunout.";
+        sell.hidden = true;
+    }
+}
+
+// ---------- horní lišta a lišta podlahy ----------
+const shown = {};
+function setText(id, v) {
+    if (shown[id] === v) return;
+    shown[id] = v;
+    $(id).textContent = v;
+}
+
 function updateHud() {
-  const R = game.run;
-  updateTop();
-  if (!R) return;
-  $('h-wave').textContent = R.wave;
-  $('h-wavebar').style.width = (R.phase === 'spawn' ? R.phaseT / WAVE_SPAWN : 1) * 100 + '%';
-  $('h-table').textContent = TIERS[R.tier - 1].name;
-  $('h-cash').textContent = fmt(Math.floor(R.cash));
-  $('h-hpbar').style.width = clamp(R.hp / R.S.maxHp, 0, 1) * 100 + '%';
-  $('h-hp').textContent = `${fmt(Math.ceil(R.hp))} / ${fmt(R.S.maxHp)}`;
-  $('b-speed').textContent = '×' + save.speed;
-  $('b-pause').textContent = game.paused ? '▶' : '❚❚';
-  $('b-perk').hidden = !R.perkOffer;
-  const sl = R.slot, hs = $('h-slot');
-  if (sl.spin > 0) { hs.textContent = '🎰 Točí se…'; hs.className = ''; }
-  else if (sl.last) {
-    const s = sl.last.sym ? SYM_MAP[sl.last.sym] : null;
-    const big = sl.last.n === 3;
-    hs.textContent = !s ? '🎰 Nic nepadlo' : big && s.id === 'seven' ? '💰 JACKPOT 777 – smete stůl!' : `${big ? '🎉 ' : ''}${s.name}: ${big ? s.triple : s.pair}`;
-    hs.className = s ? 'win' : '';
-  }
-  $('h-slotcd').style.width = (sl.spin > 0 ? 100 : clamp(sl.t / R.S.spinCd, 0, 1) * 100) + '%';
-}
+    setText("c-chips", fmt(S.chips));
+    setText("c-poop", fmt(S.poop));
+    setText("c-ram", fmt(S.ram));
+    $("cur-ram").hidden = !(S.ram > 0 || S.stats.reboots > 0);
+    setText("h-rate", fmt(rate.buckets.reduce((a, b) => a + b, 0) / rate.buckets.length));
 
-// ---------- perky ----------
-function showPerks() {
-  const R = game.run;
-  if (!R || !R.perkOffer || UI.modalOpen) return;
-  const cards = R.perkOffer.map(id => {
-    const p = PERK_MAP[id];
-    const red = p.suit === '♥' || p.suit === '♦';
-    return `<button class="pcard ${p.trade ? 'trade' : ''}" data-act="perkpick" data-id="${id}">
-      <div class="bk"></div>
-      <div class="fr"><span class="s ${red ? 'red' : ''}">${p.suit}</span><span>${esc(p.name)}</span>
-      <span class="lvl">${perkN(R, id)}/${p.max}</span></div></button>`;
-  }).join('');
-  const m = modal(`<h2>Krupiér rozdává</h2><div class="muted small">Vlna ${R.wave}: vyber si jednu kartu</div><div class="cards">${cards}</div>`, { closable: false });
-  UI.perkOpen = true;
-  m.querySelectorAll('.pcard').forEach((c, i) => setTimeout(() => c.classList.add('up'), 250 + i * 220));
-}
+    const sleeping = L.sleepingCount(S);
+    $("b-wake").hidden = sleeping === 0;
+    setText("h-sleep", String(sleeping));
 
-// ---------- ruleta ----------
-const RL = { bet: 'red', amt: 0.25, spinning: false, rot: 0, ball: -Math.PI / 2, res: null, raf: 0 };
-function showRoulette() {
-  const R = game.run;
-  if (!R) return;
-  const m = modal(`<h2>Ruleta</h2>
-    <canvas id="wheel" width="460" height="460"></canvas>
-    <div class="bets">${BETS.map(b => `<button data-act="rbet" data-id="${b.id}" class="${b.id === 'red' ? 'red' : b.id === 'black' ? 'black' : b.id === 'zero' ? 'zero' : ''}">${b.name}<small>${b.pay}× výplata</small></button>`).join('')}</div>
-    <div class="amounts">${[0.1, 0.25, 0.5, 1].map(a => `<button class="chip" data-act="ramt" data-a="${a}">${a === 1 ? 'VŠE' : a * 100 + ' %'}<small></small></button>`).join('')}</div>
-    <div class="roul-res" id="roul-res">Hraje se o žetony z tohoto runu. Hra stojí, dokud jsi u stolu.</div>
-    <div class="actions"><button class="btn gold" data-act="rspin" id="rspin">Točit</button><button class="btn ghost" data-act="close">Odejít</button></div>`);
-  updateRouletteUI();
-  drawRoulette();
-  return m;
-}
-function updateRouletteUI() {
-  const R = game.run;
-  document.querySelectorAll('[data-act="rbet"]').forEach(b => b.classList.toggle('on', b.dataset.id === RL.bet));
-  document.querySelectorAll('[data-act="ramt"]').forEach(b => {
-    b.classList.toggle('on', +b.dataset.a === RL.amt);
-    b.querySelector('small').textContent = '$' + fmt(Math.floor(R.cash * +b.dataset.a));
-  });
-  const sp = $('rspin');
-  if (sp) sp.disabled = RL.spinning || Math.floor(R.cash * RL.amt) < 1;
-}
-function drawRoulette() {
-  const cv = $('wheel');
-  if (!cv) return;
-  const g = cv.getContext('2d');
-  const W = cv.width, c = W / 2, r1 = W * 0.47, r0 = W * 0.33, n = WHEEL.length, da = Math.PI * 2 / n;
-  g.clearRect(0, 0, W, W);
-  g.beginPath(); g.arc(c, c, r1 + 8, 0, Math.PI * 2); g.fillStyle = '#3a1f12'; g.fill();
-  g.lineWidth = 4; g.strokeStyle = '#e3b448'; g.stroke();
-  for (let i = 0; i < n; i++) {
-    const a = RL.rot + i * da - Math.PI / 2;
-    g.beginPath(); g.moveTo(c, c); g.arc(c, c, r1, a, a + da); g.closePath();
-    const col = numColor(WHEEL[i]);
-    g.fillStyle = col === 'green' ? '#0d8a4c' : col === 'red' ? '#b3202e' : '#151515'; g.fill();
-    g.strokeStyle = 'rgba(227,180,72,.5)'; g.lineWidth = 1; g.stroke();
-    g.save(); g.translate(c, c); g.rotate(a + da / 2 + Math.PI / 2);
-    g.fillStyle = '#fff'; g.font = '700 17px Outfit'; g.textAlign = 'center'; g.fillText(WHEEL[i], 0, -r1 + 22); g.restore();
-  }
-  const hub = g.createRadialGradient(c, c, 5, c, c, r0);
-  hub.addColorStop(0, '#e3b448'); hub.addColorStop(0.5, '#6b3d1c'); hub.addColorStop(1, '#2a140b');
-  g.beginPath(); g.arc(c, c, r0, 0, Math.PI * 2); g.fillStyle = hub; g.fill();
-  g.strokeStyle = '#e3b448'; g.lineWidth = 3; g.stroke();
-  // středový kříž
-  g.save(); g.translate(c, c); g.rotate(RL.rot);
-  g.strokeStyle = '#ffe08a'; g.lineWidth = 6; g.lineCap = 'round';
-  g.beginPath(); g.moveTo(-r0 * 0.6, 0); g.lineTo(r0 * 0.6, 0); g.moveTo(0, -r0 * 0.6); g.lineTo(0, r0 * 0.6); g.stroke();
-  g.restore();
-  // kulička
-  const br = r1 - 40;
-  const bx = c + Math.cos(RL.ball) * br, by = c + Math.sin(RL.ball) * br;
-  const bg = g.createRadialGradient(bx - 3, by - 3, 1, bx, by, 9);
-  bg.addColorStop(0, '#fff'); bg.addColorStop(1, '#9aa0a8');
-  g.beginPath(); g.arc(bx, by, 9, 0, Math.PI * 2); g.fillStyle = bg; g.fill();
-  // ukazatel
-  g.fillStyle = '#ffe08a';
-  g.beginPath(); g.moveTo(c - 12, 2); g.lineTo(c + 12, 2); g.lineTo(c, 24); g.closePath(); g.fill();
-}
-function spinRoulette() {
-  const R = game.run;
-  if (!R || RL.spinning) return;
-  const amount = Math.floor(R.cash * RL.amt);
-  const res = playRoulette(R, RL.bet, amount);
-  if (!res) return;
-  RL.spinning = true;
-  updateRouletteUI();
-  $('roul-res').textContent = `Sázka $${fmt(amount)} na ${BETS.find(b => b.id === RL.bet).name}…`;
-  const idx = WHEEL.indexOf(res.n), n = WHEEL.length, da = Math.PI * 2 / n;
-  const r0 = RL.rot % (Math.PI * 2);
-  const target = -(idx * da + da / 2) - Math.PI * 2 * 5;
-  const b0 = RL.ball, bTarget = -Math.PI / 2 + Math.PI * 2 * 7;
-  const t0 = performance.now(), dur = 3600;
-  cancelAnimationFrame(RL.raf);
-  const anim = now => {
-    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
-    RL.rot = r0 + (target - r0) * e;
-    RL.ball = b0 + (bTarget - b0) * e;
-    drawRoulette();
-    if (k < 1) { RL.raf = requestAnimationFrame(anim); return; }
-    RL.rot = target % (Math.PI * 2); RL.ball = -Math.PI / 2;
-    RL.spinning = false;
-    const col = numColor(res.n);
-    const el = $('roul-res');
-    if (el) {
-      el.innerHTML = `Padlo <b style="color:${col === 'red' ? '#ff5d6c' : col === 'green' ? '#4fd6a0' : '#fff'}">${res.n}</b> – ` +
-        (res.win ? `<span class="good">výhra $${fmt(res.payout)}!</span>` : `<span class="bad">prohra $${fmt(res.amount)}</span>`);
-      updateRouletteUI();
+    const boost = $("b-boost");
+    boost.hidden = !S.perma.speedBoost;
+    if (!boost.hidden) {
+        const t = L.boostActive(S) ? `⏩ ${Math.ceil(S.run.boostT)} s` : `⏩ Zrychlit (💩 ${L.boostCost(S)})`;
+        setText("b-boost", t);
+        boost.disabled = L.boostActive(S) || S.poop < L.boostCost(S);
     }
-    if (res.win && res.n === 0) toast('💚 Zelená nula! Krupiér bledne', 'good');
-    writeSave();
-  };
-  RL.raf = requestAnimationFrame(anim);
-}
+    const rb = $("b-reboot");
+    rb.hidden = !L.rebootUnlocked(S);
+    if (!rb.hidden) setText("b-reboot", `💾 Reboot${L.rebootBonus(S) ? ` +${L.rebootBonus(S)}` : ""}`);
+    $("allin").hidden = !L.allInAvailable(S);
 
-// ---------- pauza a konec runu ----------
-function showPause() {
-  modal(`<h2>Pauza</h2><div class="muted small">Vlna ${game.run.wave} · ${TIERS[game.run.tier - 1].name}</div>
-    ${runSummaryHtml(game.run)}
-    <div class="actions"><button class="btn gold" data-act="close">Pokračovat</button><button class="btn" data-act="forfeit">Vstát od stolu</button></div>`);
-}
-function runSummaryHtml(R) {
-  return `<div class="sum">
-    <span>Vlna</span><b>${R.wave}</b><span>Poraženo</span><b>${fmt(R.kills)}</b>
-    <span>Vyhrané žetony</span><b>$${fmt(R.cashEarned)}</b><span>Zlaťáky</span><b>🪙 ${fmt(Math.floor(R.goldEarned))}</b>
-    <span>Diamanty</span><b>💎 ${R.gemsEarned}</b><span>Zatočení automatu</span><b>${R.spins}</b><span>Jackpoty</span><b>${R.jackpots}</b></div>`;
-}
-function showRunOver() {
-  const R = game.run;
-  UI.overShown = true;
-  const best = save.best[R.tier] === R.wave;
-  modal(`<h2>Bank vyhrál</h2><div class="muted small">${TIERS[R.tier - 1].name}${best ? ' · <span class="good">nový rekord!</span>' : ''}</div>
-    ${runSummaryHtml(R)}<div class="muted small">Zlaťáky utrať v dílně, diamanty v herně.</div>
-    <div class="actions"><button class="btn gold" data-act="again">Hrát znovu</button><button class="btn ghost" data-act="toWs">Do dílny</button></div>`,
-  { closable: false, onClose: () => { game.run = null; writeSave(); updateStart(); } });
-  writeSave();
-}
+    setText("floor-hint", floorHint());
 
-// ---------- dílna ----------
-function renderWs() {
-  const el = $('page-ws');
-  const tabs = `<div class="tabs" style="margin:-12px -12px 8px">${CATS.map(c => `<button data-act="wscat" data-cat="${c.id}" style="--c:${c.color}" class="${c.id === UI.wsCat ? 'on' : ''}">${c.name}</button>`).join('')}</div>`;
-  const col = CATS.find(c => c.id === UI.wsCat).color;
-  let html = tabs + `<div class="muted small">Trvalá vylepšení – platí od začátku každé hry. Úroveň v běhu se přičítá.</div>`;
-  const seen = new Set();
-  for (const d of STATS.filter(s => s.cat === UI.wsCat)) {
-    if (d.unlock && !isUnlocked(d)) {
-      const k = d.unlock[0];
-      if (seen.has(k)) continue;
-      seen.add(k);
-      const names = STATS.filter(s => s.unlock && s.unlock[0] === k).map(s => s.name).join(', ');
-      html += `<div class="unlock-row"><div><div class="nm">🔒 ${UNLOCK_NAMES[k]}</div><div class="muted small">${names}</div></div>
-        <button class="btn gold" data-act="unlock" data-k="${k}" ${save.gold < d.unlock[1] ? 'disabled' : ''}>🪙 ${fmt(d.unlock[1])}</button></div>`;
-      continue;
+    const nav = document.querySelectorAll("#nav button");
+    for (const b of nav) {
+        const p = b.dataset.page;
+        if (p === "crapto") b.classList.toggle("locked", !L.craptoUnlocked(S));
+        if (p === "tree") b.classList.toggle("dot", L.rebootUnlocked(S) || PERMA.some((n) => L.canBuyPerma(S, n.id)));
     }
-    const L = wsLevel(d.id), max = L >= d.max, c = goldCost(d);
-    html += `<div class="ws-row" style="--c:${col}"><div class="info"><div class="nm">${d.name} <span class="lv">úr. ${L}/${d.max}</span></div>
-      <div class="ds">${d.desc}</div><div class="vals">${d.fmt(d.f(L))}${max ? '' : ` → <b>${d.fmt(d.f(L + 1))}</b>`}</div></div>
-      <button data-act="ws" data-id="${d.id}" ${max || save.gold < c ? 'disabled' : ''}>${max ? 'MAX' : '🪙 ' + fmt(c)}</button></div>`;
-  }
-  const sy = el.scrollTop;
-  el.innerHTML = html;
-  el.scrollTop = sy;
 }
 
-// ---------- herna (talismany) ----------
-const HERNA = { spinning: false, last: null };
-function renderHerna() {
-  const el = $('page-herna');
-  const res = HERNA.last;
-  const icons = res ? [res.t.icon, res.t.icon, res.t.icon] : ['🍀', '7️⃣', '🎩'];
-  let html = `<div class="machine"><div class="lights">${'<i></i>'.repeat(9)}</div>
-    <div class="marquee">Herna talismanů</div>
-    <div class="reels">${icons.map(i => `<div class="reel"><span>${i}</span></div>`).join('')}</div>
-    <button class="btn gold big" data-act="talspin" ${save.gems < TAL_SPIN_COST || HERNA.spinning ? 'disabled' : ''}>Zatočit · ${TAL_SPIN_COST} 💎</button></div>
-    <div class="tal-result" id="tal-result">${res ? talResultHtml(res) : '<span class="muted small">Diamanty získáš za krupiéry, za každou 10. vlnu poprvé a za 💎💎💎 na automatu.</span>'}</div>
-    <div class="slots-info"><div class="sec-h" style="flex:1">Talismany</div><span class="muted small">&nbsp;Vybaveno ${save.equipped.length}/${talSlots()}</span></div>
-    <div class="muted small" style="margin:-4px 0 8px">Klepnutím talisman nasadíš nebo sundáš. Další sloty odemykají vyšší stoly. Kopie zvyšují úroveň.</div>
-    <div class="tal-grid">`;
-  for (const t of TALISMANS) {
-    const lv = talLevel(t.id), cnt = talCount(t.id), rc = TAL_RARITY[t.rarity].color;
-    const on = save.equipped.includes(t.id);
-    const nextReq = TAL_LEVEL_REQ[lv] || null;
-    html += `<button class="tal ${lv ? '' : 'unknown'} ${on ? 'on' : ''}" style="--rc:${rc}" data-act="tal" data-id="${t.id}" ${lv ? '' : 'disabled'}>
-      <span class="ic">${lv ? t.icon : '❔'}</span><span class="nm">${lv ? t.name : '???'}</span>
-      <span class="rr">${TAL_RARITY[t.rarity].name}${lv ? ' · úr. ' + lv : ''}</span>
-      <span class="ds">${t.desc(t.vals[Math.max(0, lv - 1)])}</span>
-      <span class="prog"><i style="width:${nextReq ? Math.min(100, cnt / nextReq * 100) : 100}%"></i></span>
-      <span class="muted small">${nextReq ? `${cnt}/${nextReq} kopií` : 'Maximum'}</span>
-      ${on ? '<span class="eq">✓ Nasazeno</span>' : ''}</button>`;
-  }
-  html += '</div>';
-  el.innerHTML = html;
-}
-function talResultHtml(r) {
-  return r.isNew ? `Nový talisman: <b>${r.t.icon} ${r.t.name}</b> (${TAL_RARITY[r.t.rarity].name})`
-    : r.levelUp ? `<b>${r.t.icon} ${r.t.name}</b> postoupil na úroveň ${talLevel(r.t.id)}!`
-    : `Kopie: <b>${r.t.icon} ${r.t.name}</b> (${talCount(r.t.id)} ks)`;
-}
-function talSpinUI() {
-  if (HERNA.spinning || save.gems < TAL_SPIN_COST) return;
-  const res = spinTalisman();
-  if (!res) return;
-  HERNA.spinning = true;
-  writeSave();
-  updateTop();
-  const reels = [...document.querySelectorAll('#page-herna .reel')];
-  const btn = document.querySelector('[data-act="talspin"]');
-  btn.disabled = true;
-  $('tal-result').innerHTML = '&nbsp;';
-  const pool = TALISMANS.map(t => t.icon);
-  const iv = setInterval(() => reels.forEach(r => { if (r.classList.contains('spin')) r.firstChild.textContent = pick(pool); }), 70);
-  reels.forEach(r => r.classList.add('spin'));
-  reels.forEach((r, i) => setTimeout(() => { r.classList.remove('spin'); r.firstChild.textContent = res.t.icon; }, 700 + i * 380));
-  setTimeout(() => {
-    clearInterval(iv);
-    HERNA.spinning = false;
-    HERNA.last = res;
-    if (game.run) refreshStats(game.run);
-    if (UI.page === 'herna') renderHerna();
-    if (res.t.rarity === 'epic') toast(`✨ Epický talisman: ${res.t.name}!`, 'good');
-  }, 700 + 3 * 380 + 150);
+function floorHint() {
+    const run = S.run, n = L.machineCount(S);
+    if (remodel) return "Přestavba: sousední automaty stejného typu dávají +10 % každý.";
+    if (!n) return "Klepni na volné místo a kup svůj první automat.";
+    if (!run.gamblers.length) return "Klepnutím automat roztočíš. Hráče najmeš v záložce 👶 Hráči.";
+    if (L.sleepingCount(S)) return "Spící hráč netočí – klepni na jeho automat a probuď ho.";
+    if (run.drops.length && !L.cursorLevel(S, "sticky")) return "Seber kapky 💩 a 💾 klepnutím, než zmizí.";
+    if (!L.rebootUnlocked(S)) return `Reboot se odemkne při ${fmt(REBOOT_AT)} vydělaných žetonech (${fmt(run.earned)}).`;
+    return "Reboot vymění tenhle běh za trvalá vylepšení z RAM.";
 }
 
-// ---------- rekordy ----------
-function renderStats() {
-  const st = save.stats;
-  let html = `<div class="sec-h">Stoly</div><div class="rec">`;
-  TIERS.forEach((T, i) => {
-    const t = i + 1;
-    html += `<span>${t <= save.maxTier ? '' : '🔒 '}${t}. ${T.name}</span><b>${t <= save.maxTier ? 'vlna ' + (save.best[t] || 0) : '—'}</b>`;
-  });
-  html += `</div><div class="sec-h">Statistiky</div><div class="rec">
-    <span>Odehrané hry</span><b>${st.runs}</b><span>Poražení nepřátelé</span><b>${fmt(st.kills)}</b>
-    <span>Poražení krupiéři</span><b>${st.bosses}</b><span>Zatočení automatu</span><b>${fmt(st.spins)}</b>
-    <span>Jackpoty 777</span><b>${st.jackpots}</b><span>Zlaťáky celkem</span><b>🪙 ${fmt(Math.floor(st.goldTotal))}</b>
-    <span>Ruleta – zatočení</span><b>${st.rouletteSpins}</b><span>Ruleta – vyhráno</span><b class="good">$${fmt(st.rouletteWon)}</b>
-    <span>Ruleta – prohráno</span><b class="bad">$${fmt(st.rouletteLost)}</b><span>Největší výhra v ruletě</span><b>$${fmt(st.rouletteBest)}</b></div>
-    <div class="sec-h">Výherní tabulka automatu</div><div class="rec">
-    ${SYMS.map(s => `<span>${s.ch} ${s.name}</span><b style="font-weight:500;color:var(--cream)">2× ${s.pair} · 3× ${s.triple}</b>`).join('')}</div>
-    <div style="text-align:center;margin-top:24px"><button class="btn ghost" data-act="reset">Smazat postup</button></div>`;
-  $('page-stats').innerHTML = html;
+// ---------- události z logiky ----------
+function processEvents() {
+    const evs = L.events.splice(0);
+    const quiet = evs.length > 150;
+    for (const e of evs) {
+        if (e.type === "win") {
+            rate.acc += e.amount;
+            if (e.jackpot) {
+                floatText(e.slot, `JACKPOT +${fmt(e.amount)}`, "big");
+                const t = tiles[e.slot];
+                t.classList.remove("jackpot");
+                void t.offsetWidth;
+                t.classList.add("jackpot");
+            } else if (!quiet) floatText(e.slot, "+" + fmt(e.amount));
+        } else if (e.type === "collect") {
+            if (!quiet) floatText(e.drop.s, `+${e.drop.n} ${e.drop.k === "ram" ? "RAM" : "💩"}`, e.drop.k);
+            bump(e.drop.k === "ram" ? "cur-ram" : "c-poop");
+        } else if (e.type === "ach") {
+            toast(`🏆 ${e.ach.name}`, `${e.ach.desc} · +${Math.round(ACH_BONUS * 100)} % žetonů`);
+        } else if (e.type === "reboot") {
+            clearDrops();
+            tileKeys.fill(undefined);
+        }
+    }
+}
+
+function bump(id) {
+    const el = id === "cur-ram" ? $("cur-ram") : $(id).parentElement;
+    el.classList.remove("bump");
+    void el.offsetWidth;
+    el.classList.add("bump");
+}
+
+// ---------- toasty a spodní okna ----------
+function toast(title, sub = "") {
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.innerHTML = esc(title) + (sub ? `<small>${esc(sub)}</small>` : "");
+    $("toasts").appendChild(el);
+    setTimeout(() => el.remove(), 3300);
+    while ($("toasts").childElementCount > 3) $("toasts").firstChild.remove();
+}
+
+let sheetRender = null, sheetOpenedAt = 0;
+function openSheet(render) {
+    sheetRender = render;
+    sheetOpenedAt = performance.now();
+    $("sheet-root").innerHTML = `<div class="sheet-bg" data-act="closeBg"><div class="sheet">${render()}</div></div>`;
+}
+function refreshSheet() {
+    const sh = document.querySelector("#sheet-root .sheet");
+    if (sh && sheetRender) sh.innerHTML = sheetRender();
+}
+function closeSheet() { sheetRender = null; $("sheet-root").innerHTML = ""; }
+
+function costBtn(cost, act, attrs = "", cur = "chips") {
+    if (!isFinite(cost)) return `<button class="buy max" disabled>MAX</button>`;
+    const icon = cur === "poop" ? "💩" : cur === "ram" ? "💾" : "🪙";
+    const cls = cur === "chips" ? "" : cur;
+    const can = currency(cur) >= cost;
+    return `<button class="buy ${cls}" data-act="${act}" ${attrs} data-cost="${cost}" data-cur="${cur}" ${can ? "" : "disabled"}>${icon} ${fmt(cost)}</button>`;
+}
+function currency(cur) { return cur === "poop" ? S.poop : cur === "ram" ? S.ram : S.chips; }
+function pips(l, max) { return `<div class="pips">${Array.from({ length: max }, (_, i) => `<i class="${i < l ? "on" : ""}"></i>`).join("")}</div>`; }
+
+function updateAffordability() {
+    for (const b of document.querySelectorAll("[data-cost]")) {
+        const can = currency(b.dataset.cur) >= +b.dataset.cost;
+        if (b.disabled === can) b.disabled = !can;
+    }
+}
+
+function openBuySheet(slot) {
+    openSheet(() => {
+        const rows = MACHINES.map((d) => {
+            if (!L.machineAvailable(S, d.id)) {
+                return `<div class="row"><div class="ico">${d.icon}</div><div class="info"><b>${d.name}</b><small>Vyžaduje Digitální věk (záložka ⚙️ Stroje)</small></div><button class="buy" disabled>🔒</button></div>`;
+            }
+            const st = L.machineStats(S, d.id);
+            return `<div class="row"><div class="ico">${d.icon}</div><div class="info"><b>${d.name}</b>`
+                + `<small>🪙 ${fmt(st.pay)} / ${st.time.toFixed(1).replace(".", ",")} s · jackpot ${Math.round(st.jp * 100)} % ×${st.jpMult}</small></div>`
+                + costBtn(L.machineCost(S, d.id), "buyMachine", `data-slot="${slot}" data-t="${d.id}"`) + `</div>`;
+        }).join("");
+        return `<h3>Koupit automat</h3><p class="note">Sousední automaty stejného typu si navzájem přidávají +10 % výhry.</p>`
+            + `<div class="buy-list">${rows}</div><div class="actions"><button class="btn-sec" data-act="close">Zavřít</button></div>`;
+    });
+}
+
+// ---------- stránky ----------
+const PAGES = {
+    machines: renderMachines, gamblers: renderGamblers, crapto: renderCrapto, tree: renderTree, ach: renderAch, more: renderMore,
+};
+
+function signature() {
+    switch (page) {
+        case "gamblers": return `${L.sleepingCount(S)}:${S.run.gamblers.length}:${L.machineCount(S)}`;
+        case "crapto": return `${Math.floor(S.poop)}:${S.ram}:${!!crapto.anim}:${S.stats.reboots}`;
+        case "tree": return `${S.ram}:${L.rebootUnlocked(S)}:${L.rebootBonus(S)}:${S.stats.reboots}`;
+        case "ach": return `${L.achCount(S)}`;
+        case "more": return `${Math.floor(S.poop)}`;
+        case "machines": return `${S.run.digital}:${S.run.floor.map((m) => (m ? m.t[0] : "-")).join("")}:${L.canUnlockDigital(S)}`;
+        default: return "";
+    }
+}
+
+function renderPage() {
+    pageSig = signature();
+    const fn = PAGES[page];
+    if (fn) {
+        const el = $("page-" + page), top = el.scrollTop;
+        el.innerHTML = fn();
+        el.scrollTop = top;
+        if (page === "tree") requestAnimationFrame(drawTreeLines);
+    }
+}
+
+function showPage(p) {
+    if (p !== "crapto") crapto.auto = false;
+    page = p;
+    for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("on", b.dataset.page === p);
+    for (const s of document.querySelectorAll(".page")) s.hidden = s.id !== "page-" + p;
+    if (p === "floor") { tileKeys.fill(undefined); renderFloor(); }
+    renderPage();
+}
+
+function renderMachines() {
+    let h = "";
+    if (!S.run.digital) {
+        const can = L.canUnlockDigital(S);
+        h += `<div class="card"><div class="card-head"><div class="ico">🖥️</div><div><div class="t">Digitální věk</div>`
+            + `<div class="s">Odemkne Jetelové, Kostkové a Dračí automaty.${can ? "" : " Nejdřív postav Diamantový automat."}</div></div></div>`
+            + (can ? costBtn(DIGITAL_COST, "digital", `style="width:100%"`) : `<button class="buy" style="width:100%" disabled>🔒 Vyžaduje 💎 automat</button>`) + `</div>`;
+    }
+    const types = MACHINES.filter((d) => L.countType(S, d.id) > 0 || S.run.mUp[d.id]);
+    h += `<div class="h2">Vylepšení automatů</div>`;
+    if (!types.length) h += `<p class="note">Zatím nemáš žádný automat. Kup ho klepnutím na volné místo na podlaze.</p>`;
+    for (const d of types) {
+        const st = L.machineStats(S, d.id), n = L.countType(S, d.id);
+        h += `<div class="card"><div class="card-head"><div class="ico">${d.icon}</div><div><div class="t">${d.name} ×${n}</div>`
+            + `<div class="s">🪙 ${fmt(st.pay)} · ${st.time.toFixed(2).replace(".", ",")} s · jackpot ${Math.round(st.jp * 100)} % ×${st.jpMult} · RAM rezervoár ${S.run.reservoir[d.id]}/${L.reservoirSize(S, d.id)}</div></div></div>`;
+        for (const u of MACHINE_UPGRADES) {
+            const l = (S.run.mUp[d.id] || {})[u.id] || 0;
+            h += `<div class="row"><div class="info"><b>${u.name} <span class="muted small">${l}/${u.max}</span></b><small>${u.desc}</small>${pips(l, u.max)}</div>`
+                + costBtn(L.machineUpCost(S, d.id, u.id), "buyMUp", `data-t="${d.id}" data-u="${u.id}"`) + `</div>`;
+        }
+        h += `</div>`;
+    }
+    h += `<div class="h2">Kurzor</div><div class="card">`;
+    for (const u of CURSOR_UPGRADES) {
+        const l = L.cursorLevel(S, u.id), avail = L.cursorAvailable(S, u.id);
+        h += `<div class="row"><div class="info"><b>${u.name} <span class="muted small">${l}/${u.max}</span></b><small>${u.desc}${avail ? "" : " (vyžaduje Lepkavé prsty)"}</small>${u.max > 1 ? pips(l, u.max) : ""}</div>`
+            + (avail ? costBtn(L.cursorCost(S, u.id), "buyCursor", `data-u="${u.id}"`) : `<button class="buy" disabled>🔒</button>`) + `</div>`;
+    }
+    h += `</div><div class="h2">Podlaha</div><div class="card"><div class="row"><div class="info"><b>Rozšíření podlahy <span class="muted small">${S.run.slots}/${FLOOR_SLOTS}</span></b>`
+        + `<small>Další místo pro automat. Zaplň všech 16 pro úspěch Plný dům.</small></div>${costBtn(L.expansionCost(S), "expand")}</div></div>`;
+    return h;
+}
+
+function renderGamblers() {
+    const run = S.run, hired = run.gamblers.length, n = L.machineCount(S);
+    const poopPct = Math.round(GAMBLER_BASE.poop * (S.perma.highFiber ? 1.5 : 1) * 100);
+    let h = `<div class="card"><div class="card-head"><div class="ico">👶</div><div><div class="t">Hráči v plenkách: ${hired} / ${n}</div>`
+        + `<div class="s">Sednou si k nejlepšímu volnému automatu a točí za tebe. Po ${L.maxStamina(S)} zatočeních usnou. Při každém zatočení s šancí ${poopPct} % kakají Craptoměnu.</div></div></div>`;
+    h += hired >= n
+        ? `<button class="buy big-btn" disabled>${n ? "Každý automat už má hráče" : "Nejdřív kup automat"}</button>`
+        : costBtn(L.gamblerCost(S), "hire", `style="width:100%;padding:12px"`);
+    const sl = L.sleepingCount(S);
+    if (sl) h += `<button class="btn-sec" style="width:100%;margin-top:8px" data-act="wakeAll">⏰ Probudit spící (${sl})</button>`;
+    h += `<p class="note" style="margin:8px 0 0">Probuzení celkem: <b>${S.stats.wakes}</b>${run.gamblers.some((g) => g.whale) ? " · 🐋 Velryba nikdy nespí" : ""}</p></div>`;
+    h += `<div class="h2">Vylepšení hráčů</div><div class="card">`;
+    for (const u of GAMBLER_UPGRADES) {
+        const l = L.gamblerLevel(S, u.id);
+        h += `<div class="row"><div class="info"><b>${u.name} <span class="muted small">${l}/${u.max}</span></b><small>${u.desc}</small>${u.max > 1 ? pips(l, u.max) : ""}</div>`
+            + costBtn(L.gamblerUpCost(S, u.id), "buyGUp", `data-u="${u.id}"`) + `</div>`;
+    }
+    return h + `</div>`;
+}
+
+function renderCrapto() {
+    if (!L.craptoUnlocked(S)) {
+        return `<div class="card"><div class="card-head"><div class="ico">💩</div><div><div class="t">CraptoMachine je zamčená</div>`
+            + `<div class="s">Odemkne se po prvním Rebootu. Craptoměnu si mezitím šetři – úspěch Likvidní aktiva chce mít najednou 500 💩.</div></div></div></div>`;
+    }
+    const reels = L.craptoReels(S), lines = L.craptoLines(S), bet = S.crapto.bet, cost = L.craptoSpinCost(S);
+    const active = new Set();
+    for (const id of lines) for (const [r, c] of CRAPTO_LINES[id].cells(reels)) active.add(r * 10 + c);
+    const winCells = new Set();
+    if (crapto.last && !crapto.anim) for (const w of crapto.last.wins) for (const [r, c] of w.cells) winCells.add(r * 10 + c);
+    const grid = S.crapto.grid;
+    let cells = "";
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 5; c++) {
+        if (c >= reels) { cells += `<div class="c locked">🔒</div>`; continue; }
+        const sym = grid && grid[r] && grid[r][c] ? SYM[grid[r][c]] : "❔";
+        const k = r * 10 + c;
+        const cls = crapto.anim ? "roll" : winCells.has(k) ? "win" : active.has(k) ? "" : "off";
+        cells += `<div class="c ${cls}" data-cell="${k}"><span>${sym}</span></div>`;
+    }
+    const lineTags = Object.entries(CRAPTO_LINES).map(([id, l]) => `<span class="${lines.includes(id) ? "on" : ""}">${l.name}</span>`).join("");
+    const bets = CRAPTO_BETS.map((b) => `<button data-act="bet" data-v="${b}" class="${b === bet ? "on" : ""}">${L.craptoSpinCost(S, b)}</button>`).join("");
+    const pay = L.craptoPayouts(S);
+    const rowsP = [["seven", (v) => "🪙 " + fmt(v)], ["dia", (v) => "🪙 " + fmt(v)], ["poop", (v) => `+${fmt(v)} 💩`], ["ram", (v) => `+${v} 💾`]]
+        .map(([id, f]) => `<tr><td>${SYM[id]}</td>${pay[id].map((v) => `<td>${f(v)}</td>`).join("")}</tr>`).join("");
+    const res = crapto.anim ? "Točí se…" : craptoResultText(crapto.last);
+    const st = S.stats;
+    const prog = (v, max) => `<div class="progress"><i style="width:${Math.min(100, (v / max) * 100).toFixed(1)}%"></i></div>`;
+    return `<div class="crapto"><div class="cm-title">CraptoMachine</div>`
+        + `<div class="reels" style="grid-template-columns:repeat(5,1fr)">${cells}</div>`
+        + `<div class="cm-lines">${lineTags}</div>`
+        + `<div class="bets">${bets}</div>`
+        + `<div class="cm-spin"><button class="spin" data-act="cspin" ${crapto.anim || S.poop < cost ? "disabled" : ""}>Zatočit · 💩 ${cost}</button>`
+        + `<button class="auto ${crapto.auto ? "on" : ""}" data-act="cauto">AUTO</button></div>`
+        + `<div class="cm-result">${res}</div></div>`
+        + (S.run.inflation ? `<p class="note">Za každý vyhraný 💾 v tomto běhu stojí zatočení o 10 % víc (teď +${S.run.inflation * 10} %). Reboot cenu vrátí.</p>` : "")
+        + `<div class="h2">Výplatní tabulka · sázka ${bet}</div><div class="card"><table class="paytable"><tr><th></th>${CRAPTO_TIERS.map((t) => `<th>×${t}</th>`).join("")}</tr>${rowsP}</table>`
+        + `<p class="note" style="margin:8px 0 0">Počítají se shodné symboly na políčkách aktivních linií. Celá linie z jednoho symbolu jeho výhru <b>zdvojnásobí</b>. Žetony se škálují podle tvého nejlepšího automatu.</p></div>`
+        + `<div class="h2">Crapto úspěchy</div><div class="card"><div class="kv">`
+        + `<span>Crapto Royale (protočeno)</span><span>${fmt(st.poopSpent)} / 100K</span></div>${prog(st.poopSpent, 1e5)}`
+        + `<div class="kv" style="margin-top:8px"><span>Crapto milionář (žetony)</span><span>${fmt(st.craptoChips)} / 1M</span></div>${prog(st.craptoChips, 1e6)}`
+        + `<div class="kv" style="margin-top:8px"><span>Crapto Grand (×15)</span><span>${st.bestGrand >= 15 ? "✔" : lines.includes("bot") ? "čeká na štěstí" : "potřebuje 3 řádky"}</span>`
+        + `<span>Zatočení celkem</span><span>${fmt(st.craptoSpins)}</span><span>RAM z CraptoMachine</span><span>${fmt(st.craptoRam)}</span></div></div>`;
+}
+
+function craptoResultText(r) {
+    if (!r) return `<span class="muted">Vyber sázku a zatoč.</span>`;
+    if (!r.wins.length) return `<span class="muted">Nic. Ještě jedno zatočení…</span>`;
+    const parts = [];
+    for (const w of r.wins) parts.push(`${SYM[w.sym]}×${w.x}${w.mult > 1 ? ` (linie ×${w.mult})` : ""}`);
+    const g = r.gained, got = [];
+    if (g.chips) got.push(`🪙 ${fmt(g.chips)}`);
+    if (g.poop) got.push(`${fmt(g.poop)} 💩`);
+    if (g.ram) got.push(`${g.ram} 💾`);
+    return `<span class="good">${parts.join(" · ")}</span><br>${got.join(" + ")}`;
+}
+
+function craptoSpinUI() {
+    if (crapto.anim) return;
+    const res = L.craptoSpin(S);
+    if (!res) { crapto.auto = false; renderPage(); return; }
+    crapto.anim = { res, t: 0 };
+    crapto.last = null;
+    renderPage();
+}
+
+function craptoFrame(dt) {
+    if (!crapto.anim) {
+        if (crapto.auto && page === "crapto") {
+            crapto.wait -= dt;
+            if (crapto.wait <= 0) {
+                if (S.poop >= L.craptoSpinCost(S)) craptoSpinUI();
+                else { crapto.auto = false; toast("Došla Craptoměna", "Auto-zatočení zastaveno."); renderPage(); }
+            }
+        }
+        return;
+    }
+    crapto.anim.t += dt;
+    if (page === "crapto") {
+        for (const el of document.querySelectorAll(".reels .c.roll span")) {
+            if (Math.random() < 0.5) el.textContent = CRAPTO_SYMBOLS[Math.floor(Math.random() * CRAPTO_SYMBOLS.length)].icon;
+        }
+    }
+    if (crapto.anim.t >= (crapto.auto ? 0.45 : 0.85)) {
+        crapto.last = crapto.anim.res;
+        crapto.anim = null;
+        crapto.wait = 0.35;
+        if (crapto.last.wins.some((w) => w.x === 15)) toast("💩 CRAPTO GRAND!", "Shoda ×15 na CraptoMachine!");
+        if (page === "crapto") renderPage();
+    }
+}
+
+function renderTree() {
+    const unlocked = S.stats.reboots > 0;
+    let h = `<div class="card"><div class="card-head"><div class="ico">💾</div><div><div class="t">RAM: ${fmt(S.ram)}</div>`
+        + `<div class="s">Permanentní měna. Padá z jackpotů, dokud mají automaty plný RAM rezervoár, a z CraptoMachine.</div></div></div>`;
+    if (L.rebootUnlocked(S)) {
+        h += `<button class="buy ram big-btn" data-act="rebootSheet">💾 Reboot${L.rebootBonus(S) ? ` · bonus +${L.rebootBonus(S)} RAM` : ""}</button>`;
+    } else {
+        h += `<div class="kv"><span>Reboot se odemkne při</span><span>${fmt(S.run.earned)} / ${fmt(REBOOT_AT)}</span></div>`
+            + `<div class="progress"><i style="width:${Math.min(100, S.run.earned / REBOOT_AT * 100).toFixed(1)}%;background:var(--ram)"></i></div>`;
+    }
+    h += unlocked ? "" : `<p class="note" style="margin:8px 0 0">Strom se odemkne prvním Rebootem. Tip: rebootuj, až si za RAM koupíš něco užitečného (1–3 RAM).</p>`;
+    h += `</div><div class="h2">Strom vylepšení · ${L.permaCount(S)}/${PERMA.length}</div><div class="tree" id="tree"><svg id="tree-svg"></svg>`;
+    for (const p of PERMA) {
+        const owned = L.permaOwned(S, p.id), reach = L.permaReachable(S, p.id);
+        const cls = owned ? "owned" : reach && unlocked ? (S.ram >= p.cost ? "avail" : "") : "locked";
+        h += `<button class="node ${cls}" data-act="perma" data-id="${p.id}" data-node="${p.id}" style="grid-row:${p.r + 1};grid-column:${p.c + 1}">`
+            + `<span class="i">${p.icon}</span><span class="n">${p.name}</span><span class="c">${owned ? "✔" : p.cost + " RAM"}</span></button>`;
+    }
+    return h + `</div>`;
+}
+
+function drawTreeLines() {
+    const tree = $("tree"), svg = $("tree-svg");
+    if (!tree || !svg) return;
+    const pos = {};
+    for (const el of tree.querySelectorAll("[data-node]")) {
+        pos[el.dataset.node] = { x: el.offsetLeft + el.offsetWidth / 2, y: el.offsetTop + el.offsetHeight / 2 };
+    }
+    let lines = "";
+    for (const p of PERMA) for (const r of p.req) {
+        const a = pos[r], b = pos[p.id];
+        if (a && b) lines += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" class="${S.perma[r] && S.perma[p.id] ? "on" : ""}"/>`;
+    }
+    svg.innerHTML = lines;
+}
+
+function openPermaSheet(id) {
+    openSheet(() => {
+        const p = PERMA_BY_ID[id], owned = L.permaOwned(S, id);
+        const reqs = p.req.map((r) => `${S.perma[r] ? "✔" : "✖"} ${PERMA_BY_ID[r].name}`).join("<br>");
+        let btn;
+        if (owned) btn = `<button class="buy max big-btn" disabled>Odemčeno</button>`;
+        else if (!S.stats.reboots) btn = `<button class="buy big-btn" disabled>Odemkne se prvním Rebootem</button>`;
+        else if (!L.permaReachable(S, id)) btn = `<button class="buy big-btn" disabled>Nejdřív odemkni předchozí uzly</button>`;
+        else btn = costBtn(p.cost, "buyPerma", `data-id="${id}" style="width:100%;padding:13px"`, "ram");
+        return `<h3>${p.icon} ${p.name}</h3><p class="note">${p.desc}</p>`
+            + (reqs ? `<p class="note small">Vyžaduje:<br>${reqs}</p>` : "")
+            + `<div class="actions" style="flex-direction:column">${btn}<button class="btn-sec" data-act="close">Zavřít</button></div>`;
+    });
+}
+
+function openRebootSheet() {
+    openSheet(() => {
+        const p = S.perma, pending = S.run.drops.filter((d) => d.k === "ram").reduce((a, d) => a + d.n, 0);
+        const after = S.ram + L.rebootBonus(S) + pending;
+        const cheapest = Math.min(...PERMA.filter((n) => !p[n.id] && L.permaReachable(S, n.id)).map((n) => n.cost));
+        const keeps = [
+            p.permaCherry && "Třešňové automaty", p.bpCherry && "vylepšení Třešní", p.bpBell && "vylepšení Zvonků a Diamantů",
+            p.bpDigital && "Digitální věk a jeho vylepšení", p.floorMaster && "vylepšení kurzoru", p.keepFloor && "rozšíření podlahy",
+            p.keepGamblers && "hráče a jejich vylepšení",
+        ].filter(Boolean);
+        return `<h3>💾 Reboot</h3>`
+            + `<p class="note">Reboot smaže aktuální běh: <b>žetony, automaty, vylepšení, hráče i rozšíření podlahy</b>. Zůstává RAM, Craptoměna, úspěchy, kosmetika a permanentní vylepšení.</p>`
+            + (keeps.length ? `<p class="note">Díky stromu si navíc necháš: <b>${keeps.join(", ")}</b>.</p>` : "")
+            + `<div class="card"><div class="kv"><span>Vyděláno v tomto běhu</span><span>🪙 ${fmt(S.run.earned)}</span>`
+            + `<span>Bonus za běh (každý řád nad 50K)</span><span>+${L.rebootBonus(S)} RAM</span>`
+            + `<span>RAM po Rebootu</span><span>💾 ${fmt(after)}</span></div></div>`
+            + (isFinite(cheapest) && after < cheapest ? `<p class="note bad">Za tolik RAM si zatím nic nekoupíš. Možná se vyplatí ještě chvíli počkat na další jackpot.</p>` : "")
+            + `<div class="actions"><button class="btn-sec" data-act="close">Zrušit</button><button class="buy ram" data-act="reboot">Rebootovat</button></div>`;
+    });
+}
+
+function renderAch() {
+    const n = L.achCount(S);
+    let h = `<div class="card"><div class="kv"><span>Splněno</span><span>${n} / ${ACHIEVEMENTS.length}</span><span>Bonus k žetonům</span><span>+${Math.round(n * ACH_BONUS * 100)} %</span></div></div>`;
+    for (const a of ACHIEVEMENTS) {
+        const done = !!S.ach[a.id];
+        h += `<div class="ach ${done ? "done" : ""}"><div class="i">🏆</div><div><b>${a.name}</b><small>${a.desc}</small></div></div>`;
+    }
+    return h;
+}
+
+function renderMore() {
+    const cosRow = (kind, sw) => COSMETICS.filter((c) => c.kind === kind).map((c) => {
+        const owned = S.cos.owned[c.id], on = S.cos[kind] === c.id;
+        const sub = on ? "Nasazeno" : owned ? "Nasadit" : `💩 ${c.cost}`;
+        const can = owned || S.poop >= c.cost;
+        return `<button class="cos ${on ? "on" : ""}" data-act="cos" data-id="${c.id}" ${can ? "" : "disabled"}><span class="sw" style="background:${sw[c.id]}"></span><span><b>${c.name}</b><small>${sub}</small></span></button>`;
+    }).join("");
+    const st = S.stats;
+    return `<div class="h2">Kosmetika</div><p class="note">Za Craptoměnu. Koberec mění podlahu, plenky barvu hráčů.</p>`
+        + `<div class="cos-grid">${cosRow("carpet", CARPET_SWATCH)}</div><div class="cos-grid" style="margin-top:8px">${cosRow("diaper", DIAPER_SWATCH)}</div>`
+        + `<div class="h2">Statistiky</div><div class="card"><div class="kv">`
+        + `<span>Žetony celkem</span><span>${fmt(st.lifeChips)}</span><span>Craptoměna celkem</span><span>${fmt(st.lifePoop)}</span>`
+        + `<span>RAM celkem</span><span>${fmt(st.ramTotal)}</span><span>Rebootů</span><span>${st.reboots}</span>`
+        + `<span>Jackpotů</span><span>${fmt(st.jackpots)}</span><span>Přesunutých automatů</span><span>${st.moves}</span>`
+        + `<span>Herní čas</span><span>${L.fmtTime(st.playTime)}</span><span>Tahle relace</span><span>${L.fmtTime(S.session)}</span>`
+        + `</div></div>`
+        + `<div class="h2">Jak hrát</div><div class="card note">`
+        + `<p><b>Žetony</b> vyděláváš točením automatů – klepni na ně, nebo najmi hráče v plenkách. Kupuj další automaty, vylepšení a rozšiřuj podlahu.</p>`
+        + `<p><b>Hráči</b> točí sami, ale po čase usnou – probuď je klepnutím. Občas kakají <b>Craptoměnu 💩</b>, kterou musíš sebrat.</p>`
+        + `<p><b>Jackpoty</b> občas vypustí <b>RAM 💾</b> z rezervoáru automatu. Při 50K vydělaných žetonech se odemkne <b>Reboot</b>: běh začne znovu a RAM utratíš za trvalá vylepšení ve stromu.</p>`
+        + `<p>Po prvním Rebootu se otevře <b>CraptoMachine</b>, kde se točí o Craptoměnu. A úplně na konci na tebe čeká speciální automat <b>All In</b>…</p></div>`
+        + `<button class="btn-sec" style="width:100%;color:var(--bad)" data-act="resetSheet">Smazat uloženou hru</button>`;
+}
+
+// ---------- All In a konec ----------
+function openAllInSheet() {
+    openSheet(() => `<h3>ALL IN</h3><p class="note">Speciální automat přijímá jen jednu sázku: <b>všechno</b>. Všechny žetony (🪙 ${fmt(S.chips)}) a všechnu Craptoměnu (💩 ${fmt(S.poop)}).</p>`
+        + `<p class="note">Tohle je konec hry. Pak můžeš hrát dál, ale pokud sbíráš 100 %, dokonči nejdřív ostatní úspěchy.</p>`
+        + `<div class="actions"><button class="btn-sec" data-act="close">Ještě ne</button><button class="buy" data-act="allIn" style="background:linear-gradient(#ff7fb5,#e02a78);color:#fff">Vsadit všechno</button></div>`);
+}
+
+function playEnding() {
+    closeSheet();
+    const el = $("ending");
+    el.hidden = false;
+    el.innerHTML = `<div class="allin-reels"><span>🎰</span><span>🎰</span><span>🎰</span></div>`;
+    const icons = ["🍒", "🔔", "💎", "🍀", "🎲", "🐉", "💩", "💾"];
+    const iv = setInterval(() => {
+        for (const s of el.querySelectorAll(".allin-reels span")) s.textContent = icons[Math.floor(Math.random() * icons.length)];
+    }, 90);
+    setTimeout(() => {
+        clearInterval(iv);
+        const lines = ENDING_LINES.map((t, i) => `<p class="${t === "👽" ? "alien" : ""}" style="animation-delay:${i * 2.1}s">${esc(t)}</p>`).join("");
+        const end = ENDING_LINES.length * 2.1;
+        el.innerHTML = lines + `<h2 style="animation-delay:${end}s">Konec</h2>`
+            + `<button class="btn-sec" data-act="endClose" style="animation-delay:${end + 1}s">Pokračovat ve hře</button>`;
+    }, 3000);
 }
 
 // ---------- akce ----------
 const ACTIONS = {
-  play: () => newRun(),
-  tier: el => { UI.tier = clamp(UI.tier + +el.dataset.d, 1, save.maxTier); updateStart(); },
-  cat: el => { UI.cat = el.dataset.cat; buildRunGrid(); },
-  bulk: el => { UI.bulk = el.dataset.b === 'max' ? 'max' : +el.dataset.b; buildRunTabs(); },
-  buy: el => buyRunUI(el.dataset.id),
-  risk: () => {
-    const R = game.run; if (!R) return;
-    R.risk = !R.risk;
-    toast(R.risk ? '🎲 Riskni: každý nákup hází kostkou – 4–6 = dvě úrovně, 1–3 = nic' : 'Riskování vypnuto');
-    updateRunGrid();
-  },
-  speed: () => { const sp = [1, 2, 3, 4]; save.speed = sp[(sp.indexOf(save.speed) + 1) % sp.length]; updateHud(); },
-  pause: () => showPause(),
-  roulette: () => showRoulette(),
-  perk: () => showPerks(),
-  perkpick: el => {
-    if (!el.classList.contains('up')) return;
-    choosePerk(game.run, el.dataset.id);
-    toast(`🃏 ${PERK_MAP[el.dataset.id].name}`, 'good');
-    closeModal();
-    updateRunGrid();
-  },
-  rbet: el => { if (!RL.spinning) { RL.bet = el.dataset.id; updateRouletteUI(); } },
-  ramt: el => { if (!RL.spinning) { RL.amt = +el.dataset.a; updateRouletteUI(); } },
-  rspin: () => spinRoulette(),
-  close: () => { if (!RL.spinning) closeModal(); },
-  forfeit: () => { closeModal(); endRun(game.run); },
-  again: () => { closeModal(); newRun(); },
-  toWs: () => { closeModal(); showPage('ws'); },
-  wscat: el => { UI.wsCat = el.dataset.cat; renderWs(); },
-  ws: el => { if (buyWs(el.dataset.id)) { if (game.run) refreshStats(game.run); writeSave(); renderWs(); updateTop(); } },
-  unlock: el => { if (buyUnlock(el.dataset.k)) { toast(`🔓 Odemčeno: ${UNLOCK_NAMES[el.dataset.k]}`, 'good'); writeSave(); renderWs(); updateTop(); } },
-  talspin: () => talSpinUI(),
-  tal: el => {
-    if (!toggleTalisman(el.dataset.id)) toast(`Všechny sloty jsou plné (${talSlots()})`, 'bad');
-    writeSave(); renderHerna();
-  },
-  reset: () => {
-    modal(`<h2>Smazat postup?</h2><div class="muted">Přijdeš o zlaťáky, dílnu, talismany i rekordy.</div>
-      <div class="actions"><button class="btn" data-act="resetYes">Smazat</button><button class="btn ghost" data-act="close">Zpět</button></div>`);
-  },
-  resetYes: () => { save = defaultSave(); game.run = null; closeModal(); writeSave(); UI.tier = 1; updateTop(); showPage('battle'); },
+    close: closeSheet,
+    // Okno otevřené na pointerdown nesmí hned zavřít „click“ téhož klepnutí
+    closeBg: (el, e) => { if (e.target === el && performance.now() - sheetOpenedAt > 400) closeSheet(); },
+    remodel: () => { remodel = !remodel; selSlot = -1; updateRemodelBar(); tileKeys.fill(undefined); renderFloor(); },
+    sellSel: () => { if (selSlot >= 0) { L.sellMachine(S, selSlot); selSlot = -1; updateRemodelBar(); renderFloor(); } },
+    wakeAll: () => { const n = L.wakeAll(S); if (n) toast(`⏰ Probuzeno ${n} hráčů`); renderFloor(); },
+    boost: () => { if (L.useBoost(S)) toast("⏩ Zrychlení!", "Automaty i hráči jsou 30 s dvakrát rychlejší."); },
+    rebootSheet: openRebootSheet,
+    reboot: () => {
+        if (!L.reboot(S)) return;
+        closeSheet();
+        remodel = false; selSlot = -1; updateRemodelBar();
+        processEvents();
+        crapto.last = null;
+        save();
+        toast("💾 Reboot hotov", "Utrať RAM ve stromu vylepšení.");
+        showPage("tree");
+    },
+    allInSheet: openAllInSheet,
+    allIn: () => { if (L.allIn(S)) { L.checkAchievements(S); save(); playEnding(); } },
+    endClose: () => { $("ending").hidden = true; $("ending").innerHTML = ""; showPage("floor"); },
+    buyMachine: (el) => {
+        if (L.buyMachine(S, +el.dataset.slot, el.dataset.t)) { closeSheet(); renderFloor(); }
+    },
+    buyMUp: (el) => { L.buyMachineUp(S, el.dataset.t, el.dataset.u); },
+    buyCursor: (el) => { L.buyCursor(S, el.dataset.u); },
+    buyGUp: (el) => { L.buyGamblerUp(S, el.dataset.u); },
+    hire: () => { if (L.hireGambler(S)) renderFloor(); },
+    expand: () => { L.buyExpansion(S); },
+    digital: () => { if (L.unlockDigital(S)) toast("🖥️ Digitální věk!", "Odemčeny Jetelové, Kostkové a Dračí automaty."); },
+    bet: (el) => { if (!crapto.anim) S.crapto.bet = +el.dataset.v; },
+    cspin: () => { crapto.auto = false; craptoSpinUI(); },
+    cauto: () => { crapto.auto = !crapto.auto; crapto.wait = 0; },
+    perma: (el) => openPermaSheet(el.dataset.id),
+    buyPerma: (el) => {
+        const p = PERMA_BY_ID[el.dataset.id];
+        if (L.buyPerma(S, p.id)) { closeSheet(); toast(`${p.icon} ${p.name}`, "Permanentně odemčeno."); save(); }
+    },
+    cos: (el) => {
+        if (L.buyCosmetic(S, el.dataset.id)) applyCosmetics();
+    },
+    resetSheet: () => openSheet(() => `<h3>Smazat hru?</h3><p class="note">Přijdeš o všechno včetně RAM, stromu a úspěchů. Nejde to vrátit.</p>`
+        + `<div class="actions"><button class="btn-sec" data-act="close">Zrušit</button><button class="buy" data-act="reset" style="background:var(--bad);color:#fff">Smazat</button></div>`),
+    reset: () => {
+        S = L.newState();
+        save();
+        closeSheet();
+        crapto = { anim: null, last: null, auto: false, wait: 0 };
+        clearDrops();
+        applyCosmetics();
+        showPage("floor");
+    },
 };
 
-// ---------- hlavní smyčka ----------
-let lastT = performance.now(), hudAcc = 0, saveAcc = 0;
-function loop(now) {
-  const dt = Math.min(0.1, (now - lastT) / 1000);
-  lastT = now;
-  tick(dt);
-  render(game.paused || game.modalPause ? 0 : dt);
-  const R = game.run;
-  if (R) {
-    if (R.over && !UI.overShown) { closeModal(); showRunOver(); }
-    if (R.perkOffer && !UI.modalOpen && UI.page === 'battle' && !R.over) showPerks();
-  }
-  hudAcc += dt;
-  if (hudAcc > 0.1) { hudAcc = 0; updateHud(); if (UI.page === 'battle') updateRunGrid(); }
-  saveAcc += dt;
-  if (saveAcc > 5) { saveAcc = 0; writeSave(); }
-  requestAnimationFrame(loop);
+document.getElementById("app").addEventListener("click", (e) => {
+    const nav = e.target.closest("#nav button");
+    if (nav) { showPage(nav.dataset.page); return; }
+    const el = e.target.closest("[data-act]");
+    if (!el || el.disabled) return;
+    const fn = ACTIONS[el.dataset.act];
+    if (!fn) return;
+    fn(el, e);
+    if (el.dataset.act !== "closeBg") {
+        if (page !== "floor") renderPage();
+        refreshSheet();
+    }
+});
+
+function applyCosmetics() {
+    const app = $("app");
+    app.className = `carpet-${S.cos.carpet} diaper-${S.cos.diaper}`;
 }
 
-function init() {
-  loadSave();
-  UI.tier = save.tier;
-  if (save.run) { try { restoreRun(save.run); } catch (e) { save.run = null; } }
-  initRender();
-  document.addEventListener('click', e => {
-    const nav = e.target.closest('#nav button');
-    if (nav) { showPage(nav.dataset.page); return; }
-    const el = e.target.closest('[data-act]');
-    if (el && ACTIONS[el.dataset.act] && !el.disabled) ACTIONS[el.dataset.act](el);
-  });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); });
-  window.addEventListener('pagehide', writeSave);
-  showPage('battle');
-  updateHud();
-  requestAnimationFrame(t => { lastT = t; loop(t); });
+// ---------- smyčky ----------
+let lastTick = performance.now();
+setInterval(() => {
+    const now = performance.now();
+    let el = Math.min((now - lastTick) / 1000, 60);
+    lastTick = now;
+    while (el > 1e-4) {
+        const step = Math.min(el, 0.1);
+        L.tick(S, step);
+        el -= step;
+    }
+}, 50);
+
+let lastFrame = performance.now(), slowT = 0;
+function frame(now) {
+    const dt = Math.min((now - lastFrame) / 1000, 0.25);
+    lastFrame = now;
+    processEvents();
+    rate.t += dt;
+    if (rate.t >= 1) { rate.buckets.push(rate.acc / rate.t); rate.buckets.shift(); rate.acc = 0; rate.t = 0; }
+    if (page === "floor") {
+        pointerWork();
+        renderFloor();
+        syncDrops();
+        animateTiles(now);
+    }
+    craptoFrame(dt);
+    slowT += dt;
+    if (slowT >= 0.25) {
+        slowT = 0;
+        updateHud();
+        if (page !== "floor" && !crapto.anim) {
+            if (signature() !== pageSig) renderPage();
+            else updateAffordability();
+        }
+        if (sheetRender) updateAffordability();
+    }
+    requestAnimationFrame(frame);
 }
-init();
+
+setInterval(save, 5000);
+document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
+window.addEventListener("pagehide", save);
+window.addEventListener("resize", () => {
+    clearDrops();
+    if (page === "tree") drawTreeLines();
+});
+
+applyCosmetics();
+updateRemodelBar();
+showPage("floor");
+updateHud();
+requestAnimationFrame(frame);

@@ -11,7 +11,7 @@ Osobní webová aplikace (PWA) bez buildu: čisté HTML, CSS a JavaScript. Fungu
 | `cviceni.html` | Tréninky, cviky (i vlastní s obrázkem nebo GIFem), šablony a statistiky |
 | `palivo.html` | Výpočet ceny cesty za palivo a rozúčtování mezi spolujezdce |
 | `zalozky.html` | Záložky s náhledy, složky, Reddit, bookmarklet a volitelné šifrování |
-| `hry.html` | Hry: Kanon, Kostky, Mancala, Pavouk, Neon Tower (ve složce `hry-tower/`, postup se po přihlášení ukládá do `users/{uid}/hry/tower`), Jackpot Tower (kasino varianta Tower ve složce `hry-kasino/`, postup jen v `localStorage`) |
+| `hry.html` | Hry: Kanon, Kostky, Mancala, Pavouk, Neon Tower (ve složce `hry-tower/`, postup se po přihlášení ukládá do `users/{uid}/hry/tower`), Sloty & Plenky (inkrementální kasino ve složce `hry-kasino/`, postup jen v `localStorage`) |
 | `nastaveni.html` | Nastavení aplikace |
 
 Bez přihlášení se data ukládají jen do `localStorage` v daném prohlížeči. Po přihlášení přes Google se ukládají do Firestore pod `users/{uid}` a synchronizují mezi zařízeními.
